@@ -1,0 +1,5 @@
+Download odometry data set (velodyne laser data, 80 GB) – This is essential as the paper uses point clouds from the Lidar sensor as observations (see Section 4: "observations are point clouds from the Lidar sensor").
+Download odometry ground truth poses (4 MB) – Required for the action inputs. The paper states that actions are "SE(3) poses of the ego vehicle" (Section 4), and these poses are needed to condition the world model during both training and inference.
+Download odometry data set (calibration files, 1 MB) – Likely needed to properly transform point clouds between coordinate frames (e.g., from Velodyne to camera coordinates or world coordinates).
+Recommended:
+Download odometry development kit (1 MB) – Useful for evaluation metrics and data loading utilities mentioned in the paper (e.g., computing Chamfer distance, L1 depth metrics in Table 1).

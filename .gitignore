@@ -1,0 +1,314 @@
+# =============================================================================
+# Python
+# =============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# =============================================================================
+# PyTorch / ML Models
+# =============================================================================
+# Model checkpoints and weights
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.tflite
+*.pb
+*.h5
+*.hdf5
+*.keras
+*.joblib
+*.pickle
+*.pkl
+
+# TensorBoard logs
+runs/
+tensorboard_logs/
+logs/
+
+# =============================================================================
+# Data Files
+# =============================================================================
+# Large data archives
+data/**/*.zip
+data/**/*.tar
+data/**/*.tar.gz
+data/**/*.tar.bz2
+data/**/*.tar.xz
+data/**/*.tgz
+data/**/*.bz2
+data/**/*.gz
+data/**/*.7z
+data/**/*.rar
+data/**/*.iso
+
+# Dataset directories (keep structure, ignore content)
+data/kitti/dataset/
+data/kitti/*.zip
+data/kitti/devkit/
+data/kitti/kitti-devkit-odom/
+data/kitti/devkit_odometry.zip
+data/kitti/data_odometry_*.zip
+
+# nuScenes data
+data/nuScenes/samples/
+data/nuScenes/sweeps/
+data/nuScenes/*.tgz
+data/nuScenes/*.tar.gz
+data/nuScenes/*.tar.bz2
+data/nuScenes/*.zip
+data/nuScenes/maps/
+data/nuScenes/basemap/
+data/nuScenes/expansion/
+data/nuScenes/lidarseg/
+data/nuScenes/prediction/
+data/nuScenes/nuScenes-panoptic-*/
+
+# Other common dataset formats
+*.lmdb
+*.tfrecord
+*.record
+annotations/
+images/
+labels/
+
+# =============================================================================
+# Outputs and Logs
+# =============================================================================
+# Output directories
+outputs/
+output/
+results/
+experiments/
+experiments_*/
+checkpoints/
+pretrained/
+weights/
+
+# Log files
+*.log
+nohup.out
+*.out
+
+# Debug outputs
+*.debug
+
+# =============================================================================
+# IDE and Editors
+# =============================================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Jupyter
+.jupyter/
+
+# Spyder
+.spyderproject
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.vim/
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+
+# =============================================================================
+# OS Generated Files
+# =============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.nfs*
+
+# =============================================================================
+# Papers and Documents (usually large PDFs)
+# =============================================================================
+papers/*.pdf
+papers/*.PDF
+
+# =============================================================================
+# Temporary and Cache Files
+# =============================================================================
+*.tmp
+*.temp
+*.bak
+*.backup
+tmp/
+temp/
+.cache/
+
+# Aria2 download files
+*.aria2
+aria2_input.txt
+download.log
+extract.log
+
+# =============================================================================
+# Project Specific
+# =============================================================================
+# Claude/AI specific
+.claude/
+
+# Keep structure but ignore specific files
+!data/.gitkeep
+!outputs/.gitkeep
+!papers/.gitkeep

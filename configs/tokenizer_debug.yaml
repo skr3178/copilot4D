@@ -1,0 +1,85 @@
+# Debug config for tokenizer - 256x256x16 grid, 32x32 tokens
+# Memory: < 4GB GPU
+
+# ROI bounds (metres)
+x_min: -25.6
+x_max: 25.6
+y_min: -25.6
+y_max: 25.6
+z_min: -3.0
+z_max: 3.0
+
+# Voxel grid
+voxel_grid_xy: 256
+voxel_grid_z: 16
+max_points_per_voxel: 35
+
+# Encoder
+voxel_feat_dim: 16
+bev_feat_dim: 64
+patch_size: 4
+enc_embed_dim: 128
+enc_stage1_depth: 2
+enc_stage1_heads: 8
+enc_stage2_dim: 256
+enc_stage2_depth: 6
+enc_stage2_heads: 16
+window_size: 8
+mlp_ratio: 4.0
+drop_path_rate: 0.1
+use_checkpoint: false
+
+# VQ
+vq_dim: 256
+vq_codebook_size: 1024
+vq_codebook_dim: 1024
+vq_commitment_cost: 0.25
+vq_decay: 0.99
+vq_kmeans_init: true
+vq_kmeans_iters: 10
+vq_threshold_ema_dead_code: 2
+
+# Decoder
+dec_stage1_depth: 6
+dec_stage1_heads: 16
+dec_stage2_depth: 2
+dec_stage2_heads: 8
+dec_output_dim: 128
+
+# NFG (Neural Feature Grid)
+nfg_feat_dim: 16
+nfg_upsample_factor: 2
+nfg_z_bins: 16  # same as voxel_grid_z
+nfg_mlp_hidden: 32
+num_depth_samples: 64
+
+# Rays
+rays_per_frame: 1024
+ray_chunk_size: 256
+
+# Spatial skip
+skip_upsample_factor: 4
+
+# Loss
+surface_conc_eps: 1.0
+
+# Data (KITTI Odometry: sequences 00-10 have ground truth poses, 11-21 do not)
+kitti_root: "data/kitti/pykitti"
+train_sequences: ["00", "01", "02", "03", "04", "05", "06", "07", "08"]
+val_sequences: ["09"]
+test_sequences: ["10"]
+
+# Training
+batch_size: 8
+grad_accum_steps: 1
+lr: 1.0e-4
+weight_decay: 0.01
+warmup_steps: 1000
+max_steps: 100000
+amp: true
+
+# Checkpointing
+save_every_steps: 5000
+eval_every_steps: 1000
+num_eval_batches: 10
+output_dir: "outputs/tokenizer_debug"
