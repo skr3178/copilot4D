@@ -22,11 +22,16 @@ def surface_concentration_loss(
     weights: torch.Tensor,
     sample_depths: torch.Tensor,
     gt_depths: torch.Tensor,
-    epsilon: float = 1.0,
+    epsilon: float = 0.4,
 ) -> torch.Tensor:
     """Surface concentration loss: penalize weights far from surface.
 
-    L_conc = (w_i^2 * [|d_i - d_gt| > epsilon]).sum() / (B*R)
+    Paper Equation (5):
+        L_conc = (1/(B*R)) * Σᵢ wᵢ² · 𝟙(|hᵢ - D_gt| > ε)
+
+    where 𝟙(·) is the indicator function:
+        𝟙(|hᵢ - D_gt| > ε) = 1 if sample i is farther than ε from true surface
+        𝟙(|hᵢ - D_gt| > ε) = 0 otherwise (within ε of surface)
 
     This encourages the model to concentrate weights near the true surface.
 
@@ -34,7 +39,7 @@ def surface_concentration_loss(
         weights: (B, R, S) volume rendering weights from NFG
         sample_depths: (B, R, S) depth samples along each ray
         gt_depths: (B, R) ground truth depths
-        epsilon: distance threshold (meters)
+        epsilon: distance threshold in meters (paper: ε = 0.4m)
 
     Returns:
         loss: scalar
@@ -44,11 +49,12 @@ def surface_concentration_loss(
     # Expand gt_depths to match sample_depths
     gt_depths_expanded = gt_depths.unsqueeze(-1)  # (B, R, 1)
 
-    # Mask: 1 where |d_i - d_gt| > epsilon
-    far_mask = (torch.abs(sample_depths - gt_depths_expanded) > epsilon).float()
+    # Indicator function: 𝟙(|hᵢ - D_gt| > ε)
+    # Returns 1.0 if sample is farther than epsilon from surface, 0.0 otherwise
+    indicator = (torch.abs(sample_depths - gt_depths_expanded) > epsilon).float()
 
-    # Penalize squared weights that are far from surface
-    loss = (weights ** 2 * far_mask).sum() / (B * R)
+    # Surface concentration loss: (1/(B*R)) * Σᵢ wᵢ² · 𝟙(|hᵢ - D_gt| > ε)
+    loss = (weights ** 2 * indicator).sum() / (B * R)
 
     return loss
 

@@ -5,12 +5,12 @@ import torch.nn as nn
 from typing import Tuple, Dict, Optional
 
 from copilot4d.utils.config import TokenizerConfig
-from copilot4d.tokenizer.voxel_encoder import VoxelPointNet
+from copilot4d.tokenizer.voxel_encoder_dense import DenseVoxelPointNet
 from copilot4d.tokenizer.bev_pooling import BEVPillarPooling
 from copilot4d.tokenizer.swin_transformer import SwinEncoder, SwinDecoder
 from copilot4d.tokenizer.vector_quantizer import VectorQuantizer
 from copilot4d.tokenizer.neural_feature_grid import NeuralFeatureGrid
-from copilot4d.tokenizer.spatial_skipping import SpatialSkipBranch
+from copilot4d.tokenizer.spatial_skipping import SpatialSkipBranch, compute_spatial_skip_mask, filter_rays_by_spatial_skip
 from copilot4d.tokenizer.tokenizer_losses import tokenizer_total_loss
 
 
@@ -31,14 +31,14 @@ class CoPilot4DTokenizer(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        # Point cloud encoder
-        self.voxel_encoder = VoxelPointNet(
+        # Point cloud encoder (outputs dense 3D volume per spec)
+        self.voxel_encoder = DenseVoxelPointNet(
             in_dim=4,
             hidden_dim=cfg.voxel_feat_dim,
             out_dim=cfg.voxel_feat_dim,
         )
 
-        # BEV pooling
+        # BEV pooling (concat z-embedding per spec)
         self.bev_pooling = BEVPillarPooling(
             voxel_dim=cfg.voxel_feat_dim,
             z_bins=cfg.voxel_grid_z,
@@ -49,16 +49,17 @@ class CoPilot4DTokenizer(nn.Module):
         self.encoder = SwinEncoder(cfg)
         self.decoder = SwinDecoder(cfg)
 
-        # Vector quantization
+        # Vector quantization (paper: memory bank + K-Means re-init)
         self.vq = VectorQuantizer(
             dim=cfg.vq_dim,
             codebook_size=cfg.vq_codebook_size,
             codebook_dim=cfg.vq_codebook_dim,
-            commitment_cost=cfg.vq_commitment_cost,
-            decay=cfg.vq_decay,
-            kmeans_init=cfg.vq_kmeans_init,
+            commitment_cost=cfg.vq_commitment_cost,  # lambda_1 = 0.25
+            codebook_cost=cfg.vq_codebook_cost,       # lambda_2 = 1.0
             kmeans_iters=cfg.vq_kmeans_iters,
-            threshold_ema_dead_code=cfg.vq_threshold_ema_dead_code,
+            dead_threshold=cfg.vq_dead_threshold,     # 256 iterations
+            dead_percentage=cfg.vq_dead_percentage,   # 3%
+            min_iterations=cfg.vq_min_iterations,     # 200 iterations
         )
 
         # Neural feature grid for depth rendering
@@ -79,23 +80,25 @@ class CoPilot4DTokenizer(nn.Module):
         Args:
             features: (V, max_pts, 4) padded point features per voxel
             num_points: (V,) number of real points per voxel
-            coords: (V, 3) [batch_idx, ix, iy] voxel coordinates
+            coords: (V, 4) [batch_idx, ix, iy, iz] voxel coordinates (3D)
             batch_size: B
 
         Returns:
             bev: (B, C, H, W) BEV feature map
         """
-        # VoxelPointNet
-        voxel_feats = self.voxel_encoder(features, num_points)  # (V, voxel_dim)
-
-        # BEV pooling
-        bev = self.bev_pooling(
-            voxel_feats,
+        # DenseVoxelPointNet: outputs dense 3D volume (B, H, W, Z, 16)
+        dense_volume = self.voxel_encoder(
+            features, 
+            num_points,
             coords,
             batch_size,
             self.cfg.voxel_grid_xy,
             self.cfg.voxel_grid_xy,
-        )  # (B, H, W, C)
+            self.cfg.voxel_grid_z,
+        )  # (B, 1024, 1024, 64, 16)
+
+        # BEV pooling: concat z-embedding, MLP, sum over Z
+        bev = self.bev_pooling(dense_volume)  # (B, 1024, 1024, 64)
 
         # Permute to (B, C, H, W) for Swin
         bev = bev.permute(0, 3, 1, 2).contiguous()
@@ -303,3 +306,129 @@ class CoPilot4DTokenizer(nn.Module):
         quantized = self.vq.get_codebook_entry(flat_indices)
 
         return self.decode(quantized, ray_origins, ray_directions)
+
+    def render_with_spatial_skip(
+        self,
+        indices: torch.Tensor,
+        ray_origins: torch.Tensor,
+        ray_directions: torch.Tensor,
+        pool_factor: int = 8,
+        threshold: float = 0.5,
+        return_all_rays: bool = True,
+    ) -> Dict[str, torch.Tensor]:
+        """Render depths with spatial skipping for efficient inference.
+        
+        Implements the paper's spatial skipping (Appendix A.2.1):
+        1. Decode tokens to get NFG and skip_logits
+        2. Compute coarse occupancy mask from skip_logits
+        3. Filter rays to only sample in occupied regions
+        4. Render only filtered rays through NFG
+        
+        Args:
+            indices: (B, token_grid, token_grid) discrete token indices
+            ray_origins: (B, R, 3) all query rays
+            ray_directions: (B, R, 3) all query ray directions
+            pool_factor: Max pooling factor for spatial skip (paper uses 8)
+            threshold: Probability threshold for binary mask
+            return_all_rays: If True, return depths for all rays (set skipped to -1)
+            
+        Returns:
+            dict with:
+                pred_depths: (B, R) predicted depths (-1 for skipped rays if return_all_rays)
+                nfg: (B, F, Z, H, W) neural feature grid
+                skip_logits: (B, skip_H, skip_W, Z) spatial skip logits
+                coarse_mask: (B, H//pool, W//pool, Z) binary skip mask
+                num_sampled_rays: number of rays actually sampled
+        """
+        from copilot4d.tokenizer.spatial_skipping import compute_spatial_skip_mask
+        
+        B, R, _ = ray_origins.shape
+        device = ray_origins.device
+        
+        # Decode tokens to get NFG and skip_logits
+        flat_indices = indices.view(B, -1)
+        quantized = self.vq.get_codebook_entry(flat_indices)
+        
+        # Get decoder output
+        decoder_output = self.decoder(quantized)  # (B, dec_grid^2, dec_output_dim)
+        
+        # Get spatial skip logits
+        skip_logits = self.spatial_skip(decoder_output)  # (B, skip_H, skip_W, Z)
+        
+        # Compute coarse occupancy mask for spatial skipping
+        coarse_mask = compute_spatial_skip_mask(
+            skip_logits,
+            pool_factor=pool_factor,
+            threshold=threshold,
+            add_noise=False,  # No noise during inference
+        )  # (B, H//pool, W//pool, Z)
+        
+        # Build NFG
+        nfg = self.nfg.build_nfg(decoder_output)  # (B, F, Z, H, W)
+        
+        # Check which rays intersect occupied regions
+        # Simplified: for each ray, check if origin or a near point is in occupied region
+        cfg = self.cfg
+        
+        # Sample test points along rays
+        num_test = 8
+        test_depths = torch.linspace(2.0, 80.0, num_test, device=device)
+        test_points = ray_origins.unsqueeze(2) + ray_directions.unsqueeze(2) * test_depths.view(1, 1, -1, 1)
+        # (B, R, num_test, 3)
+        
+        # Normalize to coarse_mask coordinates
+        H, W, Z = coarse_mask.shape[1:]
+        x_grid = ((test_points[..., 0] - cfg.x_min) / (cfg.x_max - cfg.x_min) * W).long()
+        y_grid = ((test_points[..., 1] - cfg.y_min) / (cfg.y_max - cfg.y_min) * H).long()
+        z_grid = ((test_points[..., 2] - cfg.z_min) / (cfg.z_max - cfg.z_min) * Z).long()
+        
+        x_grid = torch.clamp(x_grid, 0, W - 1)
+        y_grid = torch.clamp(y_grid, 0, H - 1)
+        z_grid = torch.clamp(z_grid, 0, Z - 1)
+        
+        # Check occupancy
+        ray_should_sample = torch.zeros(B, R, dtype=torch.bool, device=device)
+        for b in range(B):
+            for r in range(R):
+                xs, ys, zs = x_grid[b, r], y_grid[b, r], z_grid[b, r]
+                ray_should_sample[b, r] = (coarse_mask[b, ys, xs, zs] > 0).any()
+        
+        # Initialize output depths
+        if return_all_rays:
+            pred_depths = torch.full((B, R), -1.0, device=device)
+        
+        # Render only rays that need sampling
+        num_sampled = 0
+        all_weights = []
+        
+        for b in range(B):
+            mask = ray_should_sample[b]
+            if mask.sum() > 0:
+                num_sampled += mask.sum().item()
+                origins_b = ray_origins[b, mask].unsqueeze(0)  # (1, R', 3)
+                dirs_b = ray_directions[b, mask].unsqueeze(0)  # (1, R', 3)
+                
+                # Render this batch
+                depths_b, weights_b = self.nfg.query_rays(
+                    nfg[b:b+1], origins_b, dirs_b,
+                    cfg.ray_depth_min, cfg.ray_depth_max
+                )
+                
+                if return_all_rays:
+                    pred_depths[b, mask] = depths_b[0]
+                else:
+                    # Store separately
+                    if b == 0:
+                        pred_depths = depths_b[0]
+                    else:
+                        pred_depths = torch.cat([pred_depths, depths_b[0]], dim=0)
+        
+        return {
+            "pred_depths": pred_depths,
+            "nfg": nfg,
+            "skip_logits": skip_logits,
+            "coarse_mask": coarse_mask,
+            "num_sampled_rays": num_sampled,
+            "total_rays": B * R,
+            "skip_ratio": 1.0 - (num_sampled / (B * R)),
+        }

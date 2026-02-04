@@ -284,6 +284,20 @@ $RECYCLE.BIN/
 # =============================================================================
 papers/*.pdf
 papers/*.PDF
+*.pdf
+
+# =============================================================================
+# Images and Visualizations
+# =============================================================================
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+outputs/
+!outputs/.gitkeep
 
 # =============================================================================
 # Temporary and Cache Files
@@ -307,6 +321,17 @@ extract.log
 # =============================================================================
 # Claude/AI specific
 .claude/
+
+# Large reference codebases
+reference_code/OpenPCDet/
+reference_code/nerfacc/
+reference_code/Swin-Transformer/
+reference_code/GPT2/
+reference_code/nerf-pytorch/
+reference_code/vector-quantize-pytorch/
+
+# Testing files
+testing_tokenizer.py
 
 # Keep structure but ignore specific files
 !data/.gitkeep

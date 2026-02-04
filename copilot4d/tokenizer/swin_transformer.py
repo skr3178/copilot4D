@@ -1,11 +1,12 @@
 """Swin Transformer blocks adapted from Microsoft's reference implementation.
 
 Includes: WindowAttention, SwinTransformerBlock, PatchEmbed, PatchMerging,
-PatchUpsample (new), BasicLayer, SwinEncoder, SwinDecoder.
+PatchUpsample (DeConv), BasicLayer, SwinEncoder, SwinDecoder.
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from typing import Tuple, Optional
 
@@ -306,12 +307,16 @@ class PatchEmbed(nn.Module):
 
 
 class PatchMerging(nn.Module):
-    """Patch Merging: downsample spatial by 2x, double channels."""
+    """Patch Merging: downsample spatial by 2x, double channels.
+    
+    Groups 2x2 patches, concatenates (4C), then Linear(4C -> 2C).
+    """
 
     def __init__(self, input_resolution, dim, norm_layer=nn.LayerNorm):
         super().__init__()
         self.input_resolution = input_resolution
         self.dim = dim
+        # Concatenating 4 patches: 4*dim -> 2*dim
         self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
         self.norm = norm_layer(4 * dim)
 
@@ -329,10 +334,11 @@ class PatchMerging(nn.Module):
         assert H % 2 == 0 and W % 2 == 0
 
         x = x.view(B, H, W, C)
-        x0 = x[:, 0::2, 0::2, :]
-        x1 = x[:, 1::2, 0::2, :]
-        x2 = x[:, 0::2, 1::2, :]
-        x3 = x[:, 1::2, 1::2, :]
+        # Group into 2x2 patches
+        x0 = x[:, 0::2, 0::2, :]  # top-left
+        x1 = x[:, 1::2, 0::2, :]  # bottom-left
+        x2 = x[:, 0::2, 1::2, :]  # top-right
+        x3 = x[:, 1::2, 1::2, :]  # bottom-right
         x = torch.cat([x0, x1, x2, x3], -1)  # (B, H/2, W/2, 4*C)
         x = x.view(B, -1, 4 * C)
 
@@ -342,15 +348,27 @@ class PatchMerging(nn.Module):
 
 
 class PatchUpsample(nn.Module):
-    """Patch Upsample: inverse of PatchMerging. Upsample spatial by 2x, halve channels."""
+    """Patch Upsample: DeConv → LN → Linear (as per paper diagram).
+    
+    Uses ConvTranspose2d (DeConv) for 2x upsampling, NOT PixelShuffle.
+    """
 
     def __init__(self, input_resolution, dim, norm_layer=nn.LayerNorm):
         super().__init__()
         self.input_resolution = input_resolution
         self.dim = dim
-        # Project from dim to 2 * (dim//2) = dim for 4 sub-pixels, keeping dim//2 channels
-        self.expand = nn.Linear(dim, 4 * (dim // 2), bias=False)
-        self.norm = norm_layer(dim // 2)
+        
+        # DeConv: 2x upsampling, keeps channels
+        self.deconv = nn.ConvTranspose2d(
+            dim, dim,
+            kernel_size=2,
+            stride=2,
+            bias=False
+        )
+
+        # Paper order: DeConv → LN → Linear
+        self.norm = norm_layer(dim)
+        self.proj = nn.Linear(dim, dim // 2, bias=False)
 
     def forward(self, x):
         """
@@ -364,18 +382,21 @@ class PatchUpsample(nn.Module):
         B, L, C = x.shape
         assert L == H * W
 
-        x = self.expand(x)  # (B, H*W, 4*(C//2))
-        x = x.view(B, H, W, 4, C // 2)
+        # Reshape to spatial for DeConv
+        x = x.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
+        
+        # DeConv: 2x upsampling
+        x = self.deconv(x)  # (B, C, 2*H, 2*W)
 
-        # Rearrange: place 4 sub-pixels into 2x2 spatial grid
-        # sub-pixel order: [top-left, bottom-left, top-right, bottom-right]
-        x = x.permute(0, 1, 3, 2, 4)  # (B, H, 4, W, C//2) -- intermediate
-        x = x.reshape(B, H, 2, 2, W, C // 2)
-        x = x.permute(0, 1, 2, 4, 3, 5)  # (B, H, 2, W, 2, C//2)
-        x = x.reshape(B, 2 * H, 2 * W, C // 2)
-        x = x.view(B, -1, C // 2)
+        # Back to sequence format
+        x = x.permute(0, 2, 3, 1)  # (B, 2*H, 2*W, C)
 
-        x = self.norm(x)
+        # Paper order: LN at full channel width, then project down
+        x = self.norm(x)   # (B, 2*H, 2*W, C)
+        x = self.proj(x)   # (B, 2*H, 2*W, C//2)
+        
+        # Flatten
+        x = x.view(B, -1, self.dim // 2)
         return x
 
 
@@ -443,6 +464,9 @@ class SwinEncoder(nn.Module):
 
     Input: (B, C_in, H, W) -- BEV feature map
     Output: (B, num_tokens, enc_dim)
+    
+    Paper: "We add ViT-style absolute positional encodings of spatial coordinates
+    to the beginning of the backbone."
     """
 
     def __init__(self, cfg):
@@ -460,6 +484,13 @@ class SwinEncoder(nn.Module):
             embed_dim=cfg.enc_embed_dim,
             norm_layer=nn.LayerNorm,
         )
+        
+        # ViT-style absolute positional embeddings (paper specification)
+        # Added after PatchEmbed, before Swin blocks
+        self.pos_embed = nn.Parameter(
+            torch.zeros(1, self.patch_embed.num_patches, cfg.enc_embed_dim)
+        )
+        trunc_normal_(self.pos_embed, std=0.02)
 
         # Stochastic depth
         total_depth = cfg.enc_stage1_depth + cfg.enc_stage2_depth
@@ -493,7 +524,8 @@ class SwinEncoder(nn.Module):
             use_checkpoint=cfg.use_checkpoint,
         )
 
-        self.norm = nn.LayerNorm(cfg.enc_stage2_dim)
+        # No trailing LN here — VQ's pre_norm handles normalization
+        # (paper shows single LN → GELU + Linear at encoder→VQ boundary)
 
         self.apply(self._init_weights)
 
@@ -515,9 +547,12 @@ class SwinEncoder(nn.Module):
             (B, num_tokens, enc_stage2_dim)
         """
         x = self.patch_embed(x)  # (B, patch_res^2, enc_embed_dim)
+        
+        # Add ViT-style absolute positional embeddings (paper specification)
+        x = x + self.pos_embed
+        
         x = self.stage1(x)       # (B, (patch_res/2)^2, enc_stage2_dim)
         x = self.stage2(x)       # (B, (patch_res/2)^2, enc_stage2_dim)
-        x = self.norm(x)
         return x
 
 

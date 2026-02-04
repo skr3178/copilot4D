@@ -157,8 +157,8 @@ class NeuralFeatureGrid(nn.Module):
 
         # grid_sample expects grid of shape (B, D_out, H_out, W_out, 3) for 5D input
         # nfg is (B, F, Z, H, W) -- depth=Z, height=H, width=W
-        # grid coords: (x -> W, y -> H, z -> D) but grid_sample expects (x, y, z) = (W, H, D)
-        grid = torch.stack([y_norm, x_norm, z_norm], dim=-1)  # (B, C, S, 3)
+        # grid coords: (x, y, z) for 3D coordinates matching Figure 6's coordinate system
+        grid = torch.stack([x_norm, y_norm, z_norm], dim=-1)  # (B, C, S, 3) - X, Y, Z order
         # Reshape to (B, C, S, 1, 3) -- treating as (B, D_out=C, H_out=S, W_out=1, 3)
         grid = grid.unsqueeze(3)  # (B, C, S, 1, 3)
 

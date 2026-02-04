@@ -29,15 +29,16 @@ mlp_ratio: 4.0
 drop_path_rate: 0.1
 use_checkpoint: false
 
-# VQ
+# VQ (Paper: memory bank + K-Means re-init for dead codes)
 vq_dim: 256
 vq_codebook_size: 1024
 vq_codebook_dim: 1024
-vq_commitment_cost: 0.25
-vq_decay: 0.99
-vq_kmeans_init: true
+vq_commitment_cost: 0.25  # Paper: lambda_1 = 0.25
+vq_codebook_cost: 1.0     # Paper: lambda_2 = 1.0
 vq_kmeans_iters: 10
-vq_threshold_ema_dead_code: 2
+vq_dead_threshold: 256    # iterations before code is "dead"
+vq_dead_percentage: 0.03  # 3% threshold for re-init
+vq_min_iterations: 200    # min iterations before re-init
 
 # Decoder
 dec_stage1_depth: 6
@@ -50,7 +51,7 @@ dec_output_dim: 128
 nfg_feat_dim: 16
 nfg_upsample_factor: 2
 nfg_z_bins: 16  # same as voxel_grid_z
-nfg_mlp_hidden: 32
+nfg_mlp_hidden: 32  # Paper: hidden dimension is 32
 num_depth_samples: 64
 
 # Rays
@@ -61,7 +62,7 @@ ray_chunk_size: 256
 skip_upsample_factor: 4
 
 # Loss
-surface_conc_eps: 1.0
+surface_conc_eps: 0.4  # Paper: margin epsilon = 0.4 meters
 
 # Data (KITTI Odometry: sequences 00-10 have ground truth poses, 11-21 do not)
 kitti_root: "data/kitti/pykitti"
