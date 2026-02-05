@@ -8,7 +8,7 @@ from copilot4d.utils.config import TokenizerConfig
 from copilot4d.tokenizer.voxel_encoder_dense import DenseVoxelPointNet
 from copilot4d.tokenizer.bev_pooling import BEVPillarPooling
 from copilot4d.tokenizer.swin_transformer import SwinEncoder, SwinDecoder
-from copilot4d.tokenizer.vector_quantizer import VectorQuantizer
+from copilot4d.tokenizer.vector_quantizer_fixed import VectorQuantizerFixed
 from copilot4d.tokenizer.neural_feature_grid import NeuralFeatureGrid
 from copilot4d.tokenizer.spatial_skipping import SpatialSkipBranch, compute_spatial_skip_mask, filter_rays_by_spatial_skip
 from copilot4d.tokenizer.tokenizer_losses import tokenizer_total_loss
@@ -50,16 +50,22 @@ class CoPilot4DTokenizer(nn.Module):
         self.decoder = SwinDecoder(cfg)
 
         # Vector quantization (paper: memory bank + K-Means re-init)
-        self.vq = VectorQuantizer(
+        # Paper: L_vq = 0.25 * ||sg[E(o)] - z_hat||^2 + 1.0 * ||sg[z_hat] - E(o)||^2
+        #   lambda_1 = 0.25 (codebook loss) - codebook moves slowly toward encoder
+        #   lambda_2 = 1.0 (commitment loss) - encoder commits to codebook faster
+        # Intuition: codebook should change more slowly than the features
+        self.vq = VectorQuantizerFixed(
             dim=cfg.vq_dim,
             codebook_size=cfg.vq_codebook_size,
             codebook_dim=cfg.vq_codebook_dim,
-            commitment_cost=cfg.vq_commitment_cost,  # lambda_1 = 0.25
-            codebook_cost=cfg.vq_codebook_cost,       # lambda_2 = 1.0
+            commitment_cost=cfg.vq_commitment_cost,   # lambda_2 = 1.0
+            codebook_cost=cfg.vq_codebook_cost,        # lambda_1 = 0.25
+            decay=0.99,
             kmeans_iters=cfg.vq_kmeans_iters,
             dead_threshold=cfg.vq_dead_threshold,     # 256 iterations
             dead_percentage=cfg.vq_dead_percentage,   # 3%
             min_iterations=cfg.vq_min_iterations,     # 200 iterations
+            reinit_every=100,                          # Check every 100 steps
         )
 
         # Neural feature grid for depth rendering
@@ -126,7 +132,7 @@ class CoPilot4DTokenizer(nn.Module):
         """
         bev = self.encode_voxels(features, num_points, coords, batch_size)
         encoder_out = self.encoder(bev)  # (B, num_tokens, vq_dim)
-        quantized, indices, _ = self.vq(encoder_out)  # (B, num_tokens, vq_dim), (B, num_tokens)
+        quantized, indices, _, vq_metrics = self.vq(encoder_out)  # (B, num_tokens, vq_dim), (B, num_tokens)
 
         # Reshape indices to spatial grid
         token_grid = self.cfg.token_grid_size
@@ -212,7 +218,7 @@ class CoPilot4DTokenizer(nn.Module):
         encoder_out = self.encoder(bev)  # (B, num_tokens, vq_dim)
 
         # VQ
-        quantized, indices, vq_loss = self.vq(encoder_out)
+        quantized, indices, vq_loss, vq_metrics = self.vq(encoder_out)
 
         # Reshape indices to spatial grid
         token_grid = self.cfg.token_grid_size
@@ -226,6 +232,7 @@ class CoPilot4DTokenizer(nn.Module):
             "quantized": quantized,
             "indices": indices,
             "vq_loss": vq_loss,
+            "vq_metrics": vq_metrics,  # perplexity and usage stats
             **decode_out,
         }
 
@@ -248,6 +255,10 @@ class CoPilot4DTokenizer(nn.Module):
                 batch_size, ray_origins.shape[1], S
             )
 
+            # Get VQ loss components for detailed monitoring
+            vq_loss_codebook = torch.tensor(vq_metrics.get("vq_loss_codebook", 0.0), device=device)
+            vq_loss_commitment = torch.tensor(vq_metrics.get("vq_loss_commitment", 0.0), device=device)
+            
             losses = tokenizer_total_loss(
                 pred_depths=pred_depths,
                 gt_depths=gt_depths,
@@ -258,6 +269,8 @@ class CoPilot4DTokenizer(nn.Module):
                 gt_occupancy=gt_occupancy,
                 surface_conc_eps=self.cfg.surface_conc_eps,
                 vq_weight=1.0,
+                vq_loss_codebook=vq_loss_codebook,
+                vq_loss_commitment=vq_loss_commitment,
             )
             result["losses"] = losses
 

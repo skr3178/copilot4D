@@ -57,8 +57,11 @@ class TokenizerConfig:
     vq_dim: int = 256              # dim going into / out of VQ (encoder output dim)
     vq_codebook_size: int = 1024
     vq_codebook_dim: int = 1024    # internal codebook vector dim
-    vq_commitment_cost: float = 0.25  # Paper: lambda_1 = 0.25
-    vq_codebook_cost: float = 1.0     # Paper: lambda_2 = 1.0
+    # Paper: L_vq = lambda_1 * ||sg[E(o)] - z_hat||^2 + lambda_2 * ||sg[z_hat] - E(o)||^2
+    #   lambda_1 = 0.25 (codebook update) - codebook_cost
+    #   lambda_2 = 1.0 (commitment) - commitment_cost
+    vq_commitment_cost: float = 1.0   # lambda_2: encoder commits to codebook
+    vq_codebook_cost: float = 0.25    # lambda_1: codebook moves to encoder outputs
     vq_kmeans_iters: int = 10
     vq_dead_threshold: int = 256      # iterations before code is "dead"
     vq_dead_percentage: float = 0.03  # 3% threshold for re-init
@@ -107,7 +110,7 @@ class TokenizerConfig:
     amp: bool = True
 
     # --- Checkpointing ---
-    save_every_steps: int = 5000
+    save_every_steps: int = 2000
     eval_every_steps: int = 1000
     num_eval_batches: int = 10
     output_dir: str = "outputs/tokenizer"

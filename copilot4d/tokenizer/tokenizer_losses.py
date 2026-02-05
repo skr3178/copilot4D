@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Optional, Dict, Any
 
 
 def l1_depth_loss(pred_depths: torch.Tensor, gt_depths: torch.Tensor) -> torch.Tensor:
@@ -93,7 +94,9 @@ def tokenizer_total_loss(
     gt_occupancy: torch.Tensor,
     surface_conc_eps: float = 1.0,
     vq_weight: float = 1.0,
-) -> dict:
+    vq_loss_codebook: Optional[torch.Tensor] = None,
+    vq_loss_commitment: Optional[torch.Tensor] = None,
+) -> Dict[str, torch.Tensor]:
     """Compute total tokenizer loss as sum of all components.
 
     L = L_depth_l1 + L_surface_concentration + 1.0 * L_vq + L_skip_bce
@@ -108,9 +111,12 @@ def tokenizer_total_loss(
         gt_occupancy: (B, H, W, Z) ground truth occupancy
         surface_conc_eps: epsilon for surface concentration loss
         vq_weight: weight for VQ loss (default 1.0)
+        vq_loss_codebook: Optional scalar codebook loss component (for logging)
+        vq_loss_commitment: Optional scalar commitment loss component (for logging)
 
     Returns:
-        dict with 'total', 'depth_l1', 'surface_conc', 'vq', 'skip_bce'
+        dict with 'total', 'depth_l1', 'surface_conc', 'vq', 'skip_bce', 
+        and optionally 'vq_codebook', 'vq_commitment'
     """
     # L1 depth loss
     depth_l1 = l1_depth_loss(pred_depths, gt_depths)
@@ -126,13 +132,21 @@ def tokenizer_total_loss(
     # Total loss
     total = depth_l1 + surface_conc + vq_weight * vq_loss + skip_bce
 
-    return {
+    result = {
         "total": total,
         "depth_l1": depth_l1,
         "surface_conc": surface_conc,
         "vq": vq_loss,
         "skip_bce": skip_bce,
     }
+    
+    # Add VQ component losses for detailed monitoring
+    if vq_loss_codebook is not None:
+        result["vq_codebook"] = vq_loss_codebook
+    if vq_loss_commitment is not None:
+        result["vq_commitment"] = vq_loss_commitment
+
+    return result
 
 
 class TokenizerLoss(nn.Module):
@@ -152,7 +166,9 @@ class TokenizerLoss(nn.Module):
         vq_loss: torch.Tensor,
         skip_logits: torch.Tensor,
         gt_occupancy: torch.Tensor,
-    ) -> dict:
+        vq_loss_codebook: Optional[torch.Tensor] = None,
+        vq_loss_commitment: Optional[torch.Tensor] = None,
+    ) -> Dict[str, torch.Tensor]:
         """Compute all losses.
 
         Args:
@@ -163,6 +179,8 @@ class TokenizerLoss(nn.Module):
             vq_loss: scalar VQ loss
             skip_logits: (B, H, W, Z) spatial skip logits
             gt_occupancy: (B, H, W, Z) GT occupancy
+            vq_loss_codebook: Optional scalar codebook loss component
+            vq_loss_commitment: Optional scalar commitment loss component
 
         Returns:
             dict with loss components
@@ -177,4 +195,6 @@ class TokenizerLoss(nn.Module):
             gt_occupancy,
             self.surface_conc_eps,
             self.vq_weight,
+            vq_loss_codebook,
+            vq_loss_commitment,
         )

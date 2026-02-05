@@ -1,11 +1,13 @@
-"""Training script for CoPilot4D tokenizer."""
+"""Training script for CoPilot4D tokenizer with comprehensive monitoring."""
 
 import os
 import sys
 import argparse
 import yaml
+import json
 from pathlib import Path
 from tqdm import tqdm
+from collections import defaultdict
 
 import torch
 import torch.nn as nn
@@ -21,6 +23,7 @@ sys.path.insert(0, str(project_root))
 from copilot4d.utils.config import TokenizerConfig
 from copilot4d.tokenizer.tokenizer_model import CoPilot4DTokenizer
 from copilot4d.data.kitti_dataset import KITTITokenizerDataset, tokenizer_collate_fn
+from copilot4d.tokenizer.metrics import chamfer_distance_from_depths, compute_depth_metrics
 
 
 def load_config(config_path: str) -> TokenizerConfig:
@@ -190,7 +193,136 @@ def eval_step(
     return {
         "loss": outputs["losses"]["total"].item(),
         "losses": outputs["losses"],
+        "vq_metrics": outputs.get("vq_metrics", {}),
+        "pred_depths": outputs.get("pred_depths"),
+        "gt_depths": ray_depths,
+        "ray_origins": ray_origins,
+        "ray_directions": ray_directions,
     }
+
+
+def log_training_metrics(step: int, train_outputs: dict, lr: float, output_dir: str):
+    """Log detailed training metrics to file.
+    
+    Tracks comprehensive codebook health and reconstruction quality.
+    """
+    losses = train_outputs.get("losses", {})
+    vq_metrics = train_outputs.get("vq_metrics", {})
+    
+    def to_float(val):
+        """Convert tensor or any numeric to float."""
+        if hasattr(val, 'item'):
+            return val.item()
+        return float(val) if val is not None else 0.0
+    
+    metrics = {
+        "step": step,
+        "lr": lr,
+        "loss_total": to_float(train_outputs.get("loss", 0)),
+        # Depth metrics
+        "depth_l1": to_float(losses.get("depth_l1", 0)),
+        "surface_conc": to_float(losses.get("surface_conc", 0)),
+        # VQ loss components
+        "vq_total": to_float(losses.get("vq", 0)),
+        "vq_codebook": to_float(losses.get("vq_codebook", 0)),
+        "vq_commitment": to_float(losses.get("vq_commitment", 0)),
+        "vq_ratio": to_float(vq_metrics.get("vq_loss_ratio", 0)),
+        # Codebook health metrics
+        "vq_perplexity": to_float(vq_metrics.get("vq_perplexity", 0)),
+        "vq_entropy": to_float(vq_metrics.get("vq_entropy", 0)),
+        "vq_entropy_norm": to_float(vq_metrics.get("vq_entropy_norm", 0)),
+        "vq_active_pct": to_float(vq_metrics.get("vq_active_pct", 0)),
+        "vq_active_codes": to_float(vq_metrics.get("vq_active_codes", 0)),
+        "vq_dead_codes": to_float(vq_metrics.get("vq_dead_codes", 0)),
+        "vq_dead_pct": to_float(vq_metrics.get("vq_dead_pct", 0)),
+        # Cluster statistics
+        "vq_cluster_max": to_float(vq_metrics.get("vq_cluster_max", 0)),
+        "vq_cluster_mean": to_float(vq_metrics.get("vq_cluster_mean", 0)),
+        "vq_cluster_std": to_float(vq_metrics.get("vq_cluster_std", 0)),
+        "vq_gini": to_float(vq_metrics.get("vq_gini", 0)),
+        # Spatial skip
+        "skip_bce": to_float(losses.get("skip_bce", 0)),
+    }
+    
+    log_file = Path(output_dir) / "training_metrics.jsonl"
+    with open(log_file, "a") as f:
+        f.write(json.dumps(metrics) + "\n")
+
+
+@torch.no_grad()
+def evaluate_model(
+    model: CoPilot4DTokenizer,
+    val_loader: DataLoader,
+    cfg: TokenizerConfig,
+    device: torch.device,
+    num_batches: int = 10,
+) -> dict:
+    """Comprehensive model evaluation with Chamfer distance.
+    
+    Returns:
+        dict with aggregated metrics across validation batches
+    """
+    model.eval()
+    
+    # Accumulators for metrics
+    all_losses = []
+    all_depth_l1 = []
+    all_chamfer = []
+    all_vq_perplexity = []
+    all_vq_active_pct = []
+    all_vq_dead_pct = []
+    all_vq_entropy = []
+    
+    for i, val_batch in enumerate(val_loader):
+        if i >= num_batches:
+            break
+        
+        val_outputs = eval_step(model, val_batch, cfg, device)
+        
+        # Collect basic metrics
+        all_losses.append(val_outputs["loss"])
+        all_depth_l1.append(val_outputs["losses"].get("depth_l1", 0))
+        
+        # VQ metrics
+        vq_metrics = val_outputs.get("vq_metrics", {})
+        all_vq_perplexity.append(vq_metrics.get("vq_perplexity", 0))
+        all_vq_active_pct.append(vq_metrics.get("vq_active_pct", 0))
+        all_vq_dead_pct.append(vq_metrics.get("vq_dead_pct", 0))
+        all_vq_entropy.append(vq_metrics.get("vq_entropy", 0))
+        
+        # Chamfer distance (if we have depth predictions)
+        if val_outputs.get("pred_depths") is not None:
+            cd, cd_info = chamfer_distance_from_depths(
+                val_outputs["ray_origins"],
+                val_outputs["ray_directions"],
+                val_outputs["pred_depths"],
+                val_outputs["gt_depths"],
+            )
+            all_chamfer.append(cd.item())
+    
+    # Compute means
+    metrics = {
+        "loss": sum(all_losses) / len(all_losses),
+        "depth_l1": sum(all_depth_l1) / len(all_depth_l1),
+        "chamfer": sum(all_chamfer) / len(all_chamfer) if all_chamfer else 0.0,
+        "vq_perplexity": sum(all_vq_perplexity) / len(all_vq_perplexity),
+        "vq_active_pct": sum(all_vq_active_pct) / len(all_vq_active_pct),
+        "vq_dead_pct": sum(all_vq_dead_pct) / len(all_vq_dead_pct),
+        "vq_entropy": sum(all_vq_entropy) / len(all_vq_entropy),
+    }
+    
+    model.train()
+    return metrics
+
+
+def save_eval_metrics(step: int, metrics: dict, output_dir: str):
+    """Save evaluation metrics to file."""
+    metrics["step"] = step
+    metrics["split"] = "val"
+    
+    log_file = Path(output_dir) / "eval_metrics.jsonl"
+    with open(log_file, "a") as f:
+        f.write(json.dumps(metrics) + "\n")
 
 
 def main():
@@ -269,29 +401,32 @@ def main():
 
             # Logging
             if step % 10 == 0:
-                losses = train_outputs["losses"]
-                pbar.set_postfix({
-                    "loss": f"{train_outputs['loss']:.4f}",
-                    "depth": f"{losses['depth_l1']:.4f}",
-                    "vq": f"{losses['vq']:.4f}",
+                losses = train_outputs.get("losses", {})
+                
+                postfix = {
+                    "loss": f"{train_outputs['loss']:.3f}",
+                    "depth": f"{losses.get('depth_l1', 0):.3f}",
+                    "vq": f"{losses.get('vq', 0):.4f}",
                     "lr": f"{scheduler.get_last_lr()[0]:.6f}",
-                })
+                }
+                pbar.set_postfix(postfix)
+            
+            # Detailed logging every 100 steps
+            if step % 100 == 0:
+                log_training_metrics(step, train_outputs, scheduler.get_last_lr()[0], cfg.output_dir)
 
             # Evaluation
             if step % cfg.eval_every_steps == 0 and step > 0:
                 print(f"\n--- Eval at step {step} ---")
-                model.eval()
-                eval_losses = []
-
-                for i, val_batch in enumerate(val_loader):
-                    if i >= cfg.num_eval_batches:
-                        break
-                    val_outputs = eval_step(model, val_batch, cfg, device)
-                    eval_losses.append(val_outputs["loss"])
-
-                avg_eval_loss = sum(eval_losses) / len(eval_losses)
-                print(f"Val loss: {avg_eval_loss:.4f}")
-                model.train()
+                eval_metrics = evaluate_model(model, val_loader, cfg, device, cfg.num_eval_batches)
+                print(f"Val loss: {eval_metrics['loss']:.4f}")
+                print(f"Val depth L1: {eval_metrics.get('depth_l1', 0):.4f}")
+                print(f"Val Chamfer: {eval_metrics.get('chamfer', 0):.4f}")
+                print(f"VQ perplexity: {eval_metrics.get('vq_perplexity', 0):.1f}")
+                print(f"VQ active: {eval_metrics.get('vq_active_pct', 0):.1f}%")
+                
+                # Save eval metrics
+                save_eval_metrics(step, eval_metrics, cfg.output_dir)
 
             # Checkpointing
             if step % cfg.save_every_steps == 0 and step > 0:

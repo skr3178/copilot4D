@@ -14,7 +14,7 @@ from copilot4d.tokenizer.bev_pooling import BEVPillarPooling
 from copilot4d.tokenizer.swin_transformer import (
     SwinEncoder, SwinDecoder, PatchEmbed, PatchMerging, PatchUpsample
 )
-from copilot4d.tokenizer.vector_quantizer import VectorQuantizer
+from copilot4d.tokenizer.vector_quantizer_fixed import VectorQuantizerFixed
 from copilot4d.tokenizer.neural_feature_grid import NeuralFeatureGrid
 from copilot4d.tokenizer.spatial_skipping import SpatialSkipBranch
 from copilot4d.tokenizer.tokenizer_model import CoPilot4DTokenizer
@@ -154,7 +154,7 @@ class TestVectorQuantizer:
     """Test VectorQuantizer shapes."""
 
     def test_forward(self):
-        vq = VectorQuantizer(
+        vq = VectorQuantizerFixed(
             dim=256,
             codebook_size=1024,
             codebook_dim=1024,
@@ -162,14 +162,16 @@ class TestVectorQuantizer:
 
         B, N = 2, 64
         x = torch.randn(B, N, 256)
-        quantized, indices, loss = vq(x)
+        quantized, indices, loss, metrics = vq(x)
 
         assert quantized.shape == (B, N, 256)
         assert indices.shape == (B, N)
         assert loss.ndim == 0  # scalar
+        assert "perplexity" in metrics
+        assert "usage" in metrics
 
     def test_get_codebook_entry(self):
-        vq = VectorQuantizer(
+        vq = VectorQuantizerFixed(
             dim=256,
             codebook_size=1024,
             codebook_dim=1024,

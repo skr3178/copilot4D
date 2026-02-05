@@ -1,0 +1,86 @@
+# Memory-efficient config for tokenizer - 256x256x16 grid, 32x32 tokens
+# Memory: ~6-8GB GPU (vs ~11GB for prototype)
+
+# ROI bounds (metres) - smaller area
+x_min: -40.0
+x_max: 40.0
+y_min: -40.0
+y_max: 40.0
+z_min: -3.0
+z_max: 3.0
+
+# Voxel grid - reduced resolution
+voxel_grid_xy: 256      # Was 512 (4x reduction in BEV)
+voxel_grid_z: 16        # Was 32 (2x reduction)
+max_points_per_voxel: 35
+
+# Encoder - smaller
+voxel_feat_dim: 16
+bev_feat_dim: 32        # Was 64 (2x reduction)
+patch_size: 4
+enc_embed_dim: 64       # Was 128 (2x reduction)
+enc_stage1_depth: 2
+enc_stage1_heads: 4     # Was 8
+enc_stage2_dim: 128      # Was 256 (2x reduction)
+enc_stage2_depth: 4     # Was 6
+enc_stage2_heads: 8     # Was 16
+window_size: 8
+mlp_ratio: 4.0
+drop_path_rate: 0.1
+use_checkpoint: true    # Essential for memory
+
+# VQ (Paper: memory bank + K-Means re-init for dead codes)
+vq_dim: 128             # Was 256 (2x reduction)
+vq_codebook_size: 1024
+vq_codebook_dim: 512    # Was 1024 (2x reduction)
+vq_commitment_cost: 1.0   # lambda_2: encoder commitment
+vq_codebook_cost: 0.25    # lambda_1: codebook update
+vq_kmeans_iters: 10
+vq_dead_threshold: 256
+vq_dead_percentage: 0.03
+vq_min_iterations: 200
+
+# Decoder - smaller
+dec_stage1_depth: 4     # Was 6
+dec_stage1_heads: 8     # Was 16
+dec_stage2_depth: 2
+dec_stage2_heads: 4     # Was 8
+dec_output_dim: 64      # Was 128 (2x reduction)
+
+# NFG (Neural Feature Grid)
+nfg_feat_dim: 16
+nfg_upsample_factor: 2
+nfg_z_bins: 16          # Matches voxel_grid_z
+nfg_mlp_hidden: 32
+num_depth_samples: 48   # Was 64 (25% reduction)
+
+# Rays - fewer
+rays_per_frame: 1024    # Was 2048 (2x reduction)
+ray_chunk_size: 128     # Was 256 (smaller chunks)
+
+# Spatial skip
+skip_upsample_factor: 4
+
+# Loss
+surface_conc_eps: 0.4
+
+# Data (KITTI Odometry)
+kitti_root: "data/kitti/pykitti"
+train_sequences: ["00", "01", "02", "03", "04", "05", "06", "07", "08"]
+val_sequences: ["09"]
+test_sequences: ["10"]
+
+# Training - smaller batches
+batch_size: 2           # Was 4 (2x reduction)
+grad_accum_steps: 4     # Effective batch size = 8 (was 16)
+lr: 1.0e-4
+weight_decay: 0.01
+warmup_steps: 2000
+max_steps: 200000
+amp: true               # Mixed precision - essential
+
+# Checkpointing
+save_every_steps: 2000
+eval_every_steps: 1000
+num_eval_batches: 10    # Was 20
+output_dir: "outputs/tokenizer_memory_efficient"
