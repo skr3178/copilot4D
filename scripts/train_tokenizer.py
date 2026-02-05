@@ -317,12 +317,19 @@ def evaluate_model(
 
 def save_eval_metrics(step: int, metrics: dict, output_dir: str):
     """Save evaluation metrics to file."""
-    metrics["step"] = step
-    metrics["split"] = "val"
+    # Convert all values to JSON-serializable types
+    json_metrics = {"step": int(step), "split": "val"}
+    for key, value in metrics.items():
+        if isinstance(value, torch.Tensor):
+            json_metrics[key] = float(value.item())
+        elif isinstance(value, (int, float)):
+            json_metrics[key] = value
+        else:
+            json_metrics[key] = float(value)  # Handle numpy types
     
     log_file = Path(output_dir) / "eval_metrics.jsonl"
     with open(log_file, "a") as f:
-        f.write(json.dumps(metrics) + "\n")
+        f.write(json.dumps(json_metrics) + "\n")
 
 
 def main():
