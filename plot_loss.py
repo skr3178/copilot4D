@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Read the log file
-log_file = '/media/skr/storage/self_driving/CoPilot4D/outputs/training_scaled.log'
+log_file = '/media/skr/storage/self_driving/CoPilot4D/training_resume_22000.log'
 with open(log_file, 'r') as f:
     lines = f.readlines()
 
