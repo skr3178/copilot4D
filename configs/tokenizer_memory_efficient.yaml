@@ -1,5 +1,5 @@
-# Memory-efficient config for tokenizer - 256x256x16 grid, 32x32 tokens
-# Memory: ~6-8GB GPU (vs ~11GB for prototype)
+# Scaled-up config for tokenizer - 512x512x16 grid, 64x64 tokens
+# Memory: ~10-12GB GPU (utilizing full GPU capacity)
 
 # ROI bounds (metres) - smaller area
 x_min: -40.0
@@ -10,7 +10,7 @@ z_min: -3.0
 z_max: 3.0
 
 # Voxel grid - reduced resolution
-voxel_grid_xy: 256      # Was 512 (4x reduction in BEV)
+voxel_grid_xy: 512      # Original 512 resolution
 voxel_grid_z: 16        # Was 32 (2x reduction)
 max_points_per_voxel: 35
 
@@ -55,7 +55,7 @@ nfg_mlp_hidden: 32
 num_depth_samples: 48   # Was 64 (25% reduction)
 
 # Rays - fewer
-rays_per_frame: 1024    # Was 2048 (2x reduction)
+rays_per_frame: 2048    # Original 2048 rays
 ray_chunk_size: 128     # Was 256 (smaller chunks)
 
 # Spatial skip
@@ -71,7 +71,7 @@ val_sequences: ["09"]
 test_sequences: ["10"]
 
 # Training - smaller batches
-batch_size: 2           # Was 4 (2x reduction)
+batch_size: 4           # Original batch size
 grad_accum_steps: 4     # Effective batch size = 8 (was 16)
 lr: 1.0e-4
 weight_decay: 0.01
@@ -80,7 +80,7 @@ max_steps: 200000
 amp: true               # Mixed precision - essential
 
 # Checkpointing
-save_every_steps: 2000
+save_every_steps: 5000
 eval_every_steps: 1000
 num_eval_batches: 10    # Was 20
 output_dir: "outputs/tokenizer_memory_efficient"

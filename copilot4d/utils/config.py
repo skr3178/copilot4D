@@ -1,10 +1,7 @@
-"""TokenizerConfig: all spatial dimensions and hyperparameters for the VQVAE tokenizer.
+"""Configuration dataclasses for CoPilot4D.
 
-This configuration follows the CoPilot4D paper (Section 4.1, Appendix A.2.1):
-- ROI: [-80m, 80m] x [-80m, 80m] x [-4.5m, 4.5m]
-- Voxel size: 15.625cm x 15.625cm x 14.0625cm
-- Grid: 1024 x 1024 x 64 voxels
-- Feature dim: 64 (after PointNet)
+TokenizerConfig: VQVAE tokenizer (Section 4.1, Appendix A.2.1)
+WorldModelConfig: U-Net Spatio-Temporal Transformer world model (Section 4.4, Appendix A.2.2)
 """
 
 from dataclasses import dataclass, field
@@ -169,3 +166,88 @@ class TokenizerConfig:
     @property
     def ray_depth_max(self) -> float:
         return ((self.x_max - self.x_min) ** 2 + (self.y_max - self.y_min) ** 2) ** 0.5 / 2.0
+
+
+@dataclass
+class WorldModelConfig:
+    """World model config (Section 4.4, Appendix A.2.2).
+
+    U-Net Spatio-Temporal Transformer operating on discrete BEV tokens
+    from the frozen tokenizer. Uses discrete diffusion (improved MaskGIT).
+    """
+
+    # --- Tokenizer interface ---
+    codebook_size: int = 1024
+    token_grid_h: int = 128
+    token_grid_w: int = 128
+
+    # --- Sequence ---
+    num_frames: int = 6              # 3 past + 3 future for initial dev
+    num_past_frames: int = 3
+
+    # --- U-Net architecture ---
+    level_dims: Tuple[int, ...] = (256, 384, 512)
+    level_heads: Tuple[int, ...] = (8, 12, 16)
+    level_windows: Tuple[int, ...] = (8, 8, 16)
+    head_dim: int = 32
+    enc_st_blocks: Tuple[int, ...] = (2, 2, 1)   # ST-blocks per encoder level
+    dec_st_blocks: Tuple[int, ...] = (1, 2)       # ST-blocks per decoder level
+    mlp_ratio: float = 4.0
+    drop_path_rate: float = 0.0
+
+    # --- Action conditioning ---
+    action_dim: int = 16             # 4x4 SE(3) flattened
+
+    # --- Discrete diffusion ---
+    mask_schedule: str = "cosine"    # gamma(u) = cos(u * pi/2)
+    noise_eta: float = 20.0          # eta% uniform noise
+    label_smoothing: float = 0.1
+    prob_future_pred: float = 0.5
+    prob_joint_denoise: float = 0.4
+    prob_individual_denoise: float = 0.1
+
+    # --- Inference ---
+    num_sampling_steps: int = 10
+    cfg_weight: float = 2.0
+    choice_temperature: float = 4.5
+
+    # --- Optimization (paper A.3) ---
+    lr: float = 0.001
+    beta1: float = 0.9
+    beta2: float = 0.95
+    weight_decay: float = 0.0001
+    warmup_steps: int = 2000
+    max_steps: int = 750000
+    cosine_min_ratio: float = 0.1
+    batch_size: int = 8
+    grad_clip: float = 5.0
+    amp: bool = True
+
+    # --- Data ---
+    kitti_root: str = "data/kitti/pykitti"
+    tokenizer_checkpoint: str = ""
+    token_dir: str = ""
+    train_sequences: List[str] = field(
+        default_factory=lambda: [f"{i:02d}" for i in range(9)]
+    )
+    val_sequences: List[str] = field(default_factory=lambda: ["09"])
+    test_sequences: List[str] = field(default_factory=lambda: ["10"])
+
+    # --- Checkpointing ---
+    save_every_steps: int = 5000
+    eval_every_steps: int = 2500
+    log_every_steps: int = 100
+    output_dir: str = "outputs/world_model"
+
+    # --- Derived properties ---
+    @property
+    def mask_token_id(self) -> int:
+        return self.codebook_size     # 1024
+
+    @property
+    def vocab_size(self) -> int:
+        return self.codebook_size + 1  # 1025 (includes mask token)
+
+    @property
+    def num_tokens_per_frame(self) -> int:
+        return self.token_grid_h * self.token_grid_w  # 16384

@@ -80,7 +80,8 @@ class VectorQuantizerFixed(nn.Module):
         self.register_buffer("initted", torch.tensor(False))
 
         # Memory bank for dead code restart
-        memory_bank_size = 10 * codebook_size
+        # Use 20x to handle larger voxel grids (512x512 can produce ~16k tokens)
+        memory_bank_size = 20 * codebook_size
         self.register_buffer("memory_bank", torch.zeros(memory_bank_size, codebook_dim))
         self.register_buffer("bank_ptr", torch.zeros(1, dtype=torch.long))
 
@@ -90,6 +91,11 @@ class VectorQuantizerFixed(nn.Module):
         batch_size = data.shape[0]
         ptr = int(self.bank_ptr)
         bank_size = self.memory_bank.shape[0]
+        
+        # If data is larger than bank, only keep the most recent samples
+        if batch_size > bank_size:
+            data = data[-bank_size:]
+            batch_size = bank_size
         
         if ptr + batch_size > bank_size:
             first_part = bank_size - ptr
