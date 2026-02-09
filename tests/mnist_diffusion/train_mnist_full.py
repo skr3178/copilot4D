@@ -666,13 +666,13 @@ def main():
     parser.add_argument("--prob_joint_denoise", type=float, default=0.4)
     
     # Sampling during training
-    parser.add_argument("--sample_interval", type=int, default=20)
+    parser.add_argument("--sample_interval", type=int, default=1, help="Generate samples every N epochs")
     parser.add_argument("--num_sampling_steps", type=int, default=20)
     
     # Logging
     parser.add_argument("--output_dir", type=str, default="outputs/mnist_diffusion_full")
     parser.add_argument("--log_interval", type=int, default=50)
-    parser.add_argument("--save_interval", type=int, default=10)
+    parser.add_argument("--save_interval", type=int, default=1, help="Save checkpoint every N epochs")
     parser.add_argument("--seed", type=int, default=42)
     
     # Resume
@@ -801,8 +801,8 @@ def main():
         print(f"\nEpoch {epoch} - Train Loss: {train_loss:.4f}")
         print(f"  Objectives: {obj_counts}")
         
-        # Validate
-        if epoch % 5 == 0 or epoch == cfg.epochs:
+        # Validate (every epoch)
+        if True:  # Validate every epoch
             # Validate with regular model
             val_loss, obj_losses = validate(model, val_loader, masker, device, cfg)
             print(f"  Val Loss: {val_loss:.4f}")
@@ -829,10 +829,44 @@ def main():
                 torch.save(checkpoint, output_dir / "best_model.pt")
                 print(f"  Saved best model (val_loss: {val_loss:.4f})")
         
-        # Sample during training
-        if epoch % cfg.sample_interval == 0:
-            print("\n  Generating samples...")
-            sample_model = ema.ema_model if ema else model
+        # Save checkpoint FIRST (before sampling, since sampling loads it)
+        if epoch % cfg.save_interval == 0:
+            checkpoint = {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "train_loss": train_loss,
+            }
+            if ema:
+                checkpoint["ema"] = ema.state_dict()
+            torch.save(checkpoint, output_dir / f"checkpoint_epoch{epoch}.pt")
+            print(f"  Saved checkpoint at epoch {epoch}")
+        
+        # Sample during training (every epoch)
+        if True:  # Generate samples every epoch
+            print("\n  Generating samples from saved checkpoint...")
+            
+            # Load the checkpoint that was just saved to verify it works
+            checkpoint_path = output_dir / f"checkpoint_epoch{epoch}.pt"
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            
+            # Create a fresh model for sampling
+            sample_model = SimpleVideoTransformer(
+                vocab_size=cfg.num_token_levels,
+                mask_token_id=cfg.num_token_levels,
+                num_frames=cfg.seq_len,
+                height=cfg.frame_size,
+                width=cfg.frame_size,
+                embed_dim=cfg.embed_dim,
+                num_layers=cfg.num_layers,
+                num_heads=cfg.num_heads,
+                dropout=cfg.dropout,
+            ).to(device)
+            
+            # Load weights from checkpoint
+            sample_model.load_state_dict(checkpoint["model_state_dict"])
+            sample_model.eval()
+            print(f"  Loaded checkpoint from epoch {checkpoint['epoch']}")
             
             # Generate from scratch
             gen_tokens = generate_video(
@@ -882,19 +916,6 @@ def main():
                 title=f"Future Prediction (Epoch {epoch})"
             )
             print(f"  Samples saved to {output_dir}")
-        
-        # Save checkpoint
-        if epoch % cfg.save_interval == 0:
-            checkpoint = {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "train_loss": train_loss,
-            }
-            if ema:
-                checkpoint["ema"] = ema.state_dict()
-            torch.save(checkpoint, output_dir / f"checkpoint_epoch{epoch}.pt")
-            print(f"  Saved checkpoint at epoch {epoch}")
     
     writer.close()
     print(f"\n{'='*60}")
