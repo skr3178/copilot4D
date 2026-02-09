@@ -125,7 +125,7 @@ class KITTISequenceDataset(Dataset):
             tokens = torch.load(token_file, map_location="cpu", weights_only=True)
             tokens_list.append(tokens)
         
-        tokens = torch.stack(tokens_list, dim=0)  # (T, H, W)
+        tokens = torch.stack(tokens_list, dim=0).long()  # (T, H, W)
         
         # Load poses
         with open(seq_path / "poses.pkl", "rb") as f:

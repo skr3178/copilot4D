@@ -143,6 +143,7 @@ logs/
 # Large data archives
 data/**/*.zip
 data/**/*.tar
+*.npy
 data/**/*.tar.gz
 data/**/*.tar.bz2
 data/**/*.tar.xz

@@ -88,6 +88,8 @@ class WorldModelSampler:
             future_logits = logits[:, T_past].reshape(B, N, -1)  # (B, N, vocab_size)
 
             # Sample x̃_0 from logits (Algorithm 2 step 3)
+            # Exclude mask token from sampling
+            future_logits[:, :, self.mask_token_id] = float('-inf')
             sampled_tokens = torch.distributions.Categorical(logits=future_logits).sample()  # (B, N)
 
             # Compute confidence: l_k = log p(x̃_0 | x_{k+1}) + Gumbel * k/K

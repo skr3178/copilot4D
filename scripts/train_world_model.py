@@ -286,7 +286,14 @@ def validate(
 def log_metrics(step: int, metrics: dict, lr: float, log_file: str = None):
     """Log metrics to console and JSONL file."""
     log_entry = {"step": step, "lr": lr, "time": time.time(), **metrics}
-    log_str = f"Step {step}: loss={metrics['loss']:.4f}, acc={metrics['acc']:.4f}, lr={lr:.2e}"
+    parts = [f"Step {step}"]
+    for k, v in metrics.items():
+        if isinstance(v, float):
+            parts.append(f"{k}={v:.4f}")
+        elif isinstance(v, str):
+            parts.append(f"{k}={v}")
+    parts.append(f"lr={lr:.2e}")
+    log_str = ", ".join(parts)
     print(log_str)
 
     if log_file:

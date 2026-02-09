@@ -54,6 +54,8 @@ def load_tokenizer(config_path: str, checkpoint_path: str, device: torch.device)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if "model_state_dict" in checkpoint:
         model.load_state_dict(checkpoint["model_state_dict"])
+    elif "model" in checkpoint:
+        model.load_state_dict(checkpoint["model"])
     else:
         model.load_state_dict(checkpoint)
 
@@ -84,6 +86,13 @@ def main():
         sys.path.insert(0, _pykitti_path)
     from pykitti import odometry
 
+    # pykitti expects basedir/poses/{seq}.txt - find the correct base
+    kitti_base = cfg.kitti_root
+    if not os.path.exists(os.path.join(kitti_base, "poses")):
+        candidate = os.path.join(kitti_base, "dataset")
+        if os.path.exists(os.path.join(candidate, "poses")):
+            kitti_base = candidate
+
     # Process each sequence
     for seq in sequences:
         print(f"\n=== Sequence {seq} ===")
@@ -91,7 +100,7 @@ def main():
         seq_dir.mkdir(parents=True, exist_ok=True)
 
         # Load the pykitti dataset for poses
-        kitti_data = odometry(cfg.kitti_root, seq)
+        kitti_data = odometry(kitti_base, seq)
         num_frames = len(kitti_data)
 
         # Extract poses: dict mapping frame_idx -> 4x4 numpy array
