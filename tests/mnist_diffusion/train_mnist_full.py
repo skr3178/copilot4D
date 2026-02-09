@@ -500,9 +500,10 @@ def generate_video(
         # On non-mask indices: confidence = +inf (keep unmasked)
         confidence[~is_masked.reshape(B, T, N_total)] = float('inf')
         
-        # Update tokens with samples
-        tokens_flat = tokens.reshape(B, T, N_total)
-        tokens_flat = torch.where(is_masked.reshape(B, T, N_total), sampled, tokens_flat)
+        # Update tokens with samples (flatten for consistent indexing)
+        tokens_flat = tokens.reshape(B, T * N_total)
+        sampled_flat = sampled.reshape(B, T * N_total)
+        tokens_flat = torch.where(is_masked.reshape(B, T * N_total), sampled_flat, tokens_flat)
         
         if paper_k > 0:
             # Keep top-M confident predictions unmasked
@@ -514,10 +515,10 @@ def generate_video(
             
             # Re-mask low confidence positions
             tokens_flat[new_mask] = mask_token_id
-            is_masked = new_mask.reshape(B, T, N_total)
+            is_masked = new_mask.reshape(B, T, height, width)
         else:
             # Last step: keep everything unmasked
-            is_masked = torch.zeros((B, T, N_total), dtype=torch.bool, device=device)
+            is_masked = torch.zeros((B, T, height, width), dtype=torch.bool, device=device)
         
         tokens = tokens_flat.reshape(B, T, height, width)
     
@@ -602,9 +603,10 @@ def predict_future(
         
         confidence[~is_masked[:, T_past:].reshape(B_curr, T_f, N_tok)] = float('inf')
         
-        # Update
-        future_flat = all_tokens[:, T_past:].reshape(B_curr, T_f, N_tok)
-        future_flat = torch.where(is_masked[:, T_past:].reshape(B_curr, T_f, N_tok), sampled, future_flat)
+        # Update (flatten for consistent indexing)
+        future_flat = all_tokens[:, T_past:].reshape(B_curr, T_f * N_tok)
+        sampled_flat = sampled.reshape(B_curr, T_f * N_tok)
+        future_flat = torch.where(is_masked[:, T_past:].reshape(B_curr, T_f * N_tok), sampled_flat, future_flat)
         
         if paper_k > 0:
             conf_flat = confidence.reshape(B_curr, T_f * N_tok)
@@ -614,9 +616,9 @@ def predict_future(
             new_mask.scatter_(1, top_indices, False)
             
             future_flat[new_mask] = mask_token_id
-            is_masked[:, T_past:] = new_mask.reshape(B_curr, T_f, N_tok)
+            is_masked[:, T_past:] = new_mask.reshape(B_curr, T_f, H, W)
         else:
-            is_masked[:, T_past:] = False
+            is_masked[:, T_past:] = torch.zeros((B_curr, T_f, H, W), dtype=torch.bool, device=device)
         
         all_tokens[:, T_past:] = future_flat.reshape(B_curr, T_f, H, W)
     
@@ -895,7 +897,7 @@ def main():
             )
             
             # Save samples
-            from tests.mnist_diffusion.analyze_samples import save_comparison_grid, tokens_to_video
+            from generate_validation_results import save_comparison_grid, tokens_to_video
             
             # Save generation
             gen_video = tokens_to_video(gen_tokens[0], levels=cfg.num_token_levels)
