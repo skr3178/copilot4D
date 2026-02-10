@@ -36,6 +36,8 @@ class MovingMNISTPrecomputed(Dataset):
         num_token_levels: int = 16,
         preload: bool = True,
         frame_size: int = 64,
+        use_ego_centric: bool = False,
+        ego_digit_id: int = 0,
     ):
         self.data_path = data_path
         self.seq_len = min(seq_len, 20)
@@ -43,6 +45,8 @@ class MovingMNISTPrecomputed(Dataset):
         self.num_token_levels = num_token_levels
         self.preload = preload
         self.frame_size = frame_size
+        self.use_ego_centric = use_ego_centric
+        self.ego_digit_id = ego_digit_id
         
         # Determine if we need to resize
         self.needs_resize = (frame_size != 64)
@@ -90,7 +94,12 @@ class MovingMNISTPrecomputed(Dataset):
             # Pre-quantize all data
             self.tokens = self._quantize(self.data, num_token_levels)
             # Generate synthetic actions based on frame differences
-            self.actions = self._generate_actions()
+            if use_ego_centric:
+                self.actions = self._generate_actions_ego_centric(ego_digit_id)
+                self.action_dim = 2  # Override for ego-centric [dx, dy]
+                print(f"Using ego-centric actions (tracking digit {ego_digit_id})")
+            else:
+                self.actions = self._generate_actions()
         else:
             self.tokens = None
             self.actions = None
@@ -179,6 +188,84 @@ class MovingMNISTPrecomputed(Dataset):
         
         return actions
     
+    def _generate_actions_ego_centric(self, ego_digit_id=0):
+        """Generate ego-centric continuous actions [dx, dy] tracking one digit.
+        
+        Args:
+            ego_digit_id: Which digit to track (0 or 1)
+            
+        Returns:
+            (N, T, 2) action array with continuous [dx, dy] normalized to [-1, 1]
+        """
+        N, T, H, W = self.data.shape
+        actions = np.zeros((N, T, 2), dtype=np.float32)
+        
+        for n in range(N):
+            for t in range(1, T):
+                # Get consecutive frames
+                f0 = self.data[n, t-1].astype(np.float32)
+                f1 = self.data[n, t].astype(np.float32)
+                
+                # Connected component analysis to separate digits
+                from scipy import ndimage
+                
+                # Threshold to get digit pixels
+                binary0 = f0 > 50
+                binary1 = f1 > 50
+                
+                # Label connected components
+                labeled0, num_features0 = ndimage.label(binary0)
+                labeled1, num_features1 = ndimage.label(binary1)
+                
+                def get_largest_component_center(labeled, num_features, target_idx=0):
+                    """Get center of mass of target component (by size ranking)."""
+                    if num_features < 1:
+                        return None
+                    
+                    # Get component sizes (skip background 0)
+                    sizes = ndimage.sum(binary0, labeled, range(1, num_features + 1))
+                    if len(sizes) == 0:
+                        return None
+                    
+                    # Sort by size
+                    sorted_indices = np.argsort(sizes)[::-1]  # Largest first
+                    
+                    if target_idx >= len(sorted_indices):
+                        target_idx = 0  # Fall back to largest
+                    
+                    component_id = sorted_indices[target_idx] + 1  # +1 because labels start at 1
+                    mask = (labeled == component_id)
+                    
+                    y_coords, x_coords = np.where(mask)
+                    if len(y_coords) == 0:
+                        return None
+                    
+                    return np.array([y_coords.mean(), x_coords.mean()])
+                
+                # Get centers for ego digit (largest component = 0, second = 1)
+                center0 = get_largest_component_center(labeled0, num_features0, ego_digit_id)
+                center1 = get_largest_component_center(labeled1, num_features1, ego_digit_id)
+                
+                if center0 is not None and center1 is not None:
+                    # Compute displacement
+                    dy = center1[0] - center0[0]
+                    dx = center1[1] - center0[1]
+                    
+                    # Normalize to [-1, 1] range (frame size is H, W)
+                    dx_norm = dx / (W / 2)
+                    dy_norm = dy / (H / 2)
+                    
+                    actions[n, t] = [dx_norm, dy_norm]
+                else:
+                    # Digit not visible, use zero motion
+                    actions[n, t] = [0.0, 0.0]
+            
+            # First frame: use same as second frame (no prior motion)
+            if T > 1:
+                actions[n, 0] = actions[n, 1]
+        
+        return actions
+    
     def __len__(self):
         return self.num_sequences
     
@@ -230,6 +317,8 @@ def create_mnist_dataloaders(
     num_workers=4,
     num_token_levels=16,
     frame_size=64,
+    use_ego_centric=False,
+    ego_digit_id=0,
 ):
     """Create train and validation dataloaders.
     
@@ -241,6 +330,8 @@ def create_mnist_dataloaders(
         num_val: Number of validation sequences
         num_workers: DataLoader workers
         num_token_levels: Quantization levels for tokens
+        use_ego_centric: Use ego-centric continuous actions [dx, dy]
+        ego_digit_id: Which digit to track (0=largest, 1=second largest)
         
     Returns:
         train_loader, val_loader
@@ -253,6 +344,8 @@ def create_mnist_dataloaders(
         start_idx=0,
         num_token_levels=num_token_levels,
         frame_size=frame_size,
+        use_ego_centric=use_ego_centric,
+        ego_digit_id=ego_digit_id,
     )
     
     # Validation set
@@ -263,6 +356,8 @@ def create_mnist_dataloaders(
         start_idx=num_train,
         num_token_levels=num_token_levels,
         frame_size=frame_size,
+        use_ego_centric=use_ego_centric,
+        ego_digit_id=ego_digit_id,
     )
     
     train_loader = torch.utils.data.DataLoader(

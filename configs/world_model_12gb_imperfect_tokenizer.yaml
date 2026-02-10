@@ -1,0 +1,65 @@
+# CoPilot4D World Model - 12GB GPU, Imperfect Tokenizer Adapted
+# Reduced expectations for tokenizer limited to ~20m range
+
+# --- Tokenizer interface ---
+codebook_size: 1024
+token_grid_h: 64
+token_grid_w: 64
+
+# --- Sequence ---
+# Shorter sequences since far-field is unreliable
+num_frames: 4      # 2 past -> 2 future (shorter horizon)
+num_past_frames: 2
+
+# --- U-Net architecture ---
+level_dims: [128, 256, 384]
+level_heads: [4, 8, 12]
+level_windows: [8, 8, 8]
+head_dim: 32
+enc_st_blocks: [1, 1, 1]
+dec_st_blocks: [1, 1]
+mlp_ratio: 4.0
+drop_path_rate: 0.0
+
+# --- Action conditioning ---
+action_dim: 16
+
+# --- Discrete diffusion ---
+mask_schedule: "cosine"
+noise_eta: 20.0
+label_smoothing: 0.1
+# Focus more on future prediction (what we care about)
+prob_future_pred: 0.7       # Was 0.5
+prob_joint_denoise: 0.2
+prob_individual_denoise: 0.1
+
+# --- Inference ---
+num_sampling_steps: 10
+cfg_weight: 2.0
+choice_temperature: 4.5
+
+# --- Optimization ---
+lr: 0.001
+beta1: 0.9
+beta2: 0.95
+weight_decay: 0.0001
+warmup_steps: 1000
+max_steps: 30000          # Shorter - validate first
+cosine_min_ratio: 0.1
+batch_size: 1
+grad_clip: 5.0
+amp: true
+
+# --- Data ---
+kitti_root: "data/kitti/pykitti"
+tokenizer_checkpoint: "outputs/tokenizer_memory_efficient/checkpoint_step_80000.pt"
+token_dir: "outputs/tokens_sample"
+train_sequences: ["00"]
+val_sequences: ["00"]
+test_sequences: ["00"]
+
+# --- Checkpointing ---
+save_every_steps: 2000
+eval_every_steps: 1000
+log_every_steps: 50
+output_dir: "outputs/world_model_12gb_imperfect"

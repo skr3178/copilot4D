@@ -137,13 +137,23 @@ def predict_future(
             conf_flat = confidence.reshape(B_curr, T_f * N_tok)
             _, top_indices = torch.topk(conf_flat, k=num_keep, dim=-1)
             
-            new_mask = torch.ones((B_curr, T_f * N_tok), dtype=torch.bool, device=device)
-            new_mask.scatter_(1, top_indices, False)
+            # Create update mask: positions to unmask (top-M AND currently masked)
+            update_mask = torch.zeros((B_curr, T_f * N_tok), dtype=torch.bool, device=device)
+            update_mask.scatter_(1, top_indices, True)
+            current_mask_flat = is_masked[:, T_past:].reshape(B_curr, T_f * N_tok)
+            update_mask &= current_mask_flat  # Only update masked positions
             
-            future_flat[new_mask] = mask_token_id
-            is_masked[:, T_past:] = new_mask.reshape(B_curr, T_f, H, W)
+            # Update: keep previously unmasked tokens, only change selected masked ones
+            future_flat = torch.where(update_mask, sampled_flat, future_flat)
+            
+            # Update mask tracking: unmask the positions we just filled
+            new_mask_flat = current_mask_flat.clone()
+            new_mask_flat &= ~update_mask
+            is_masked[:, T_past:] = new_mask_flat.reshape(B_curr, T_f, H, W)
         else:
-            is_masked[:, T_past:] = torch.zeros((B_curr, T_f, H, W), dtype=torch.bool, device=device)
+            # Last step: use all sampled tokens
+            future_flat = sampled_flat
+            is_masked[:, T_past:] = False
         
         all_tokens[:, T_past:] = future_flat.reshape(B_curr, T_f, H, W)
     
@@ -159,7 +169,7 @@ def generate_video(
     num_steps: int = 20,
     device: str = 'cuda',
     temperature: float = 1.0,
-    action_dim: int = 4,
+    action_dim: int = 2,
 ) -> torch.Tensor:
     """Generate a video from scratch using Algorithm 2."""
     model.eval()
@@ -212,12 +222,22 @@ def generate_video(
             confidence_flat = confidence.reshape(B_curr, T * N_total)
             _, top_indices = torch.topk(confidence_flat, k=num_keep, dim=-1)
             
-            new_mask = torch.ones((B_curr, T * N_total), dtype=torch.bool, device=device)
-            new_mask.scatter_(1, top_indices, False)
+            # Create update mask: positions to unmask (top-M AND currently masked)
+            update_mask = torch.zeros((B_curr, T * N_total), dtype=torch.bool, device=device)
+            update_mask.scatter_(1, top_indices, True)
+            current_mask_flat = is_masked.reshape(B_curr, T * N_total)
+            update_mask &= current_mask_flat  # Only update masked positions
             
-            tokens_flat[new_mask] = mask_token_id
-            is_masked = new_mask.reshape(B_curr, T, height, width)
+            # Update: keep previously unmasked tokens, only change selected masked ones
+            tokens_flat = torch.where(update_mask, sampled_flat, tokens_flat)
+            
+            # Update mask tracking: unmask the positions we just filled
+            new_mask_flat = current_mask_flat.clone()
+            new_mask_flat &= ~update_mask
+            is_masked = new_mask_flat.reshape(B_curr, T, height, width)
         else:
+            # Last step: use all sampled tokens
+            tokens_flat = sampled_flat
             is_masked = torch.zeros((B_curr, T, height, width), dtype=torch.bool, device=device)
         
         tokens = tokens_flat.reshape(B_curr, T, height, width)
@@ -536,8 +556,9 @@ def main():
     
     # Create model
     model = SimpleVideoTransformer(
-        vocab_size=args.num_token_levels,
+        vocab_size=args.num_token_levels + 1,
         mask_token_id=args.num_token_levels,
+        action_dim=2,
         num_frames=20,
         height=args.frame_size,
         width=args.frame_size,
@@ -573,6 +594,8 @@ def main():
         num_token_levels=args.num_token_levels,
         num_sequences=2000,
         start_idx=8000,
+        use_ego_centric=True,
+        ego_digit_id=0,
     )
     print(f"  Val samples: {len(val_dataset)}")
     

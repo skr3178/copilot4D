@@ -113,16 +113,24 @@ class WorldModelSampler:
 
             if paper_k > 0:
                 # x_k = x̃_0 on top-M indices of l_k (Algorithm 2 step 7)
-                # Top-M have highest confidence → keep unmasked; rest → re-mask
+                # Only update positions that are currently masked
                 _, top_indices = torch.topk(confidence, k=num_keep, dim=-1)  # (B, num_keep)
-                new_mask = torch.ones((B, N), dtype=torch.bool, device=device)
-                new_mask.scatter_(1, top_indices, False)
-
-                # Re-mask low confidence positions
-                future_flat[new_mask] = self.mask_token_id
-                is_masked[:, T_past] = new_mask.reshape(B, H, W)
+                
+                # Create update mask: positions to unmask (top-M AND currently masked)
+                update_mask = torch.zeros((B, N), dtype=torch.bool, device=device)
+                update_mask.scatter_(1, top_indices, True)
+                update_mask &= current_mask_flat  # Only update masked positions
+                
+                # Update: x_k = x̃_0 on selected indices, keep x_{k+1} elsewhere
+                # This preserves previously unmasked tokens (unlike the buggy version)
+                future_flat = torch.where(update_mask, sampled_tokens, future_flat)
+                
+                # Update mask tracking: unmask the positions we just filled
+                current_mask_flat &= ~update_mask
+                is_masked[:, T_past] = current_mask_flat.reshape(B, H, W)
             else:
-                # Last step: keep everything unmasked
+                # Last step: use all sampled tokens, everything unmasked
+                future_flat = sampled_tokens
                 is_masked[:, T_past] = False
 
             tokens[:, T_past] = future_flat.reshape(B, H, W)

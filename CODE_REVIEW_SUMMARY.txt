@@ -1,0 +1,137 @@
+================================================================================
+                    CODE REVIEW SUMMARY
+          CoPilot4D Training on Moving MNIST (Fast Version)
+================================================================================
+
+1. MODEL (SimpleVideoTransformer)
+   ├─ Token Embedding: vocab_size(17) → embed_dim(128)
+   ├─ Action Projection: action_dim(2) → embed_dim(128)
+   ├─ Positional Encoding: 
+   │  ├─ Temporal: Sinusoidal (learned)
+   │  └─ Spatial: Learnable parameters (1, 1, 1024, 128)
+   ├─ Transformer Layers (2 layers):
+   │  ├─ Spatial Attention (across 1024 tokens per frame)
+   │  ├─ Temporal Attention (across 20 frames, causal mask)
+   │  └─ MLP (4x expansion, GELU activation)
+   └─ Output Projection: embed_dim(128) → vocab_size(17)
+
+   Parameters: 0.67M | Checkpoint: 7.7 MB
+
+================================================================================
+
+2. DATA LOADING (MovingMNISTCached)
+   ├─ Raw data: mnist_test_seq.1.npy (20, 10000, 64, 64)
+   ├─ Preprocessing:
+   │  ├─ Resize: 64x64 → 32x32 (zoom factor 0.5)
+   │  └─ Quantize: uint8 → 16 discrete levels
+   ├─ Action Generation (Ego-centric):
+   │  ├─ Track largest digit center between frames
+   │  ├─ Compute dx, dy displacement
+   │  └─ Normalize to [-1, 1] range
+   └─ Caching: Actions saved to .pkl for fast loading
+
+   Training: 2000 sequences | Validation: 500 sequences
+
+================================================================================
+
+3. TRAINING LOOP (train_mnist_fast.py)
+   ├─ Optimizer: AdamW(lr=3e-4, weight_decay=0.01)
+   ├─ Scheduler: CosineAnnealingLR(T_max=total_steps, eta_min=1e-6)
+   ├─ Mixed Precision: torch.amp.autocast('cuda')
+   ├─ Gradient Clipping: max_norm=1.0
+   └─ Objective: Future Prediction Only
+
+   Forward Pass:
+   1. Mask FUTURE frames with random ratio (0.5-1.0)
+   2. Keep PAST frames visible (conditioning)
+   3. Apply causal temporal mask (autoregressive)
+   4. Compute loss only on FUTURE predictions
+
+   Training Config:
+   ├─ Epochs: 50
+   ├─ Batch Size: 4
+   ├─ Past Frames: 10 (given)
+   └─ Future Frames: 10 (predict)
+
+================================================================================
+
+4. SAMPLING (generate_validation_results.py)
+   
+   Future Prediction (Conditional):
+   ├─ Input: 10 past frames (ground truth)
+   ├─ Initialize: 10 future frames as MASK tokens
+   ├─ Iterative Denoising (K=20 steps):
+   │  ├─ Predict all tokens with current model
+   │  ├─ Sample from logits (with temperature)
+   │  └─ Cosine mask schedule: keep some, remask others
+   └─ Output: 10 predicted future frames
+
+   Metrics:
+   ├─ MSE: Mean Squared Error (pixel space)
+   ├─ PSNR: Peak Signal-to-Noise Ratio  
+   └─ SSIM: Structural Similarity Index
+
+================================================================================
+
+5. KEY DIFFERENCES FROM FULL MODEL
+
+   Aspect          │ Fast (Current)    │ Full
+   ────────────────┼───────────────────┼────────────────
+   Parameters      │ 0.67M             │ 14.6M
+   Layers          │ 2                 │ 6
+   Embed Dim       │ 128               │ 384
+   Training Obj    │ Future only       │ Future+Joint+Indiv
+   Data Size       │ 2000 seq          │ 8000 seq
+   Checkpoint      │ 7.7 MB            │ 223 MB
+   Training Time   │ ~2 hours          │ ~8 hours
+
+================================================================================
+
+6. FILE STRUCTURE
+
+   Key Files:
+   ├─ simple_model.py           → Model architecture
+   ├─ moving_mnist_cached.py    → Dataset with caching
+   ├─ train_mnist_fast.py       → Training script (this run)
+   └─ generate_validation_results.py → Evaluation
+
+   Outputs:
+   ├─ outputs/mnist_diffusion_fast/best_model.pt
+   ├─ outputs/mnist_diffusion_fast/checkpoint_epoch{N}.pt
+   └─ outputs/mnist_diffusion_fast/results_epoch{N}/
+      ├─ future_pred/     → Conditional prediction results
+      └─ generation/      → Unconditional generation (harder task)
+
+================================================================================
+
+7. CURRENT STATUS (as of review)
+   
+   Training:  Epoch 11 / 50 (22% complete)
+   Val Loss:  0.4118 (improving)
+   GPU:       100% utilization, ~9GB memory
+   ETA:       ~1.5 hours remaining
+
+   Results (Epoch 11):
+   ├─ MSE:  0.0649
+   ├─ PSNR: 12.75 dB
+   └─ SSIM: 0.0564
+
+   Observation: Short-term prediction (frames 0-6) works well.
+   Long-term (frames 8-10) degrades to noise.
+
+================================================================================
+
+8. CRITICAL IMPLEMENTATION DETAILS
+
+   ✓ Temporal Masking: Causal (triu) for autoregressive prediction
+   ✓ Action Integration: Added to each frame's embedding
+   ✓ Spatial-Attention First: Local patterns before temporal
+   ✓ Discrete Tokens: 16 levels + 1 mask token
+   ✓ Cosine Schedule: For masking ratio during sampling
+   ✓ Ego-centric Actions: [dx, dy] continuous, normalized
+
+   ⚠️ Known Issues:
+   - Long-term prediction degrades (needs more training or larger model)
+   - Pure generation is noisy (expected - not trained for it)
+
+================================================================================

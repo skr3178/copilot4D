@@ -184,7 +184,8 @@ class DiscreteDiffusionMasker:
 
         elif objective == "joint_denoise":
             # All frames partially masked + noised
-            temporal_mask = self._make_causal_mask(T, device)
+            # Bidirectional: all frames attend to all frames (no temporal mask)
+            temporal_mask = None  # No mask for bidirectional attention
 
             for b in range(B):
                 masked, was_m = self.apply_random_masking(
@@ -232,6 +233,11 @@ class DiscreteDiffusionMasker:
         mask = torch.full((T, T), float("-inf"), device=device)
         mask.fill_diagonal_(0.0)
         return mask
+    
+    @staticmethod
+    def _make_bidirectional_mask(T: int, device: torch.device) -> torch.Tensor:
+        """All-zeros mask (all frames attend to all frames)."""
+        return torch.zeros((T, T), device=device)
 
 
 def compute_diffusion_loss(
@@ -641,6 +647,8 @@ def main():
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--num_token_levels", type=int, default=16)
     parser.add_argument("--frame_size", type=int, default=64)
+    parser.add_argument("--use_ego_centric", action="store_true", help="Use ego-centric continuous actions [dx, dy]")
+    parser.add_argument("--ego_digit_id", type=int, default=0, help="Which digit to track (0=largest, 1=second)")
     
     # Model (larger for high-quality generation)
     parser.add_argument("--embed_dim", type=int, default=512)
@@ -715,11 +723,15 @@ def main():
         num_workers=cfg.num_workers,
         num_token_levels=cfg.num_token_levels,
         frame_size=cfg.frame_size,
+        use_ego_centric=cfg.use_ego_centric,
+        ego_digit_id=cfg.ego_digit_id,
     )
     
     # Create model
     print("\n" + "="*60)
     print("Creating model...")
+    action_dim = 2 if cfg.use_ego_centric else 4
+    print(f"  Action dim: {action_dim} ({'ego-centric' if cfg.use_ego_centric else 'standard'})")
     model = SimpleVideoTransformer(
         vocab_size=cfg.num_token_levels,
         mask_token_id=cfg.num_token_levels,
@@ -730,6 +742,7 @@ def main():
         num_layers=cfg.num_layers,
         num_heads=cfg.num_heads,
         dropout=cfg.dropout,
+        action_dim=action_dim,
     ).to(device)
     
     total_params = sum(p.numel() for p in model.parameters())
