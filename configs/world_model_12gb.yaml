@@ -51,7 +51,7 @@ amp: true
 # --- Data ---
 kitti_root: "data/kitti/pykitti"
 tokenizer_checkpoint: "outputs/tokenizer_memory_efficient/checkpoint_step_22000.pt"
-token_dir: "outputs/tokens_sample"
+token_dir: "outputs/kitti_tokens_seq00"
 train_sequences: ["00"]
 val_sequences: ["00"]
 test_sequences: ["00"]

@@ -1,0 +1,81 @@
+# CoPilot4D World Model - Large Configuration (12GB GPU)
+# Scaled up to use ~8-10GB GPU memory
+# Paper specs: 42.41M parameters, this config: ~35M parameters
+
+# Token configuration (matches tokenizer output)
+codebook_size: 1024
+token_grid_h: 64
+token_grid_w: 64
+
+# Temporal configuration  
+num_frames: 5          # Total frames in sequence
+num_past_frames: 2     # Frames to condition on
+
+# Architecture: U-Net Spatio-Temporal Transformer
+# Level 1: 128x128 tokens (input/output)
+# Level 2: 64x64 tokens (middle)
+# Level 3: 32x32 tokens (bottleneck)
+
+# Level dimensions (scaled up from 12GB config)
+level_dims: [256, 384, 512]  # Paper specs
+level_heads: [8, 12, 16]      # Attention heads per level (scaled)
+level_windows: [8, 8, 8]      # Window size for local attention
+head_dim: 32                  # Dimension per head
+
+# Encoder blocks per level (scaled up)
+enc_st_blocks: [2, 2, 1]  # Paper specs: [2,2,1] vs [1,1,1]
+
+# Decoder blocks per level (scaled up)
+dec_st_blocks: [1, 2]     # Paper specs: [1,2] vs [1,1]
+
+mlp_ratio: 4.0            # MLP hidden dim = dim * mlp_ratio
+drop_path_rate: 0.1       # Stochastic depth (paper uses 0.1)
+
+# Action conditioning
+action_dim: 16            # Flattened 4x4 SE(3) matrix
+
+# Training configuration
+lr: 0.0005                # Slightly lower for larger model
+beta1: 0.9
+beta2: 0.95
+weight_decay: 0.0001
+
+warmup_steps: 2000        # Longer warmup for stability
+max_steps: 100000         # More steps with larger dataset
+cosine_min_ratio: 0.1
+
+batch_size: 1
+grad_accum_steps: 8       # Effective batch size = 8
+grad_clip: 5.0
+amp: true                 # Automatic Mixed Precision
+
+# Discrete diffusion configuration
+mask_schedule: "cosine"   # γ(u) = cos(u·π/2)
+noise_eta: 20.0           # Gumbel noise temperature
+label_smoothing: 0.1
+
+# Training objective probabilities
+prob_future_pred: 0.5     # 50% - predict future frames
+prob_joint_denoise: 0.4   # 40% - joint past/future denoising
+prob_individual_denoise: 0.1  # 10% - single frame denoising
+
+# Sampling configuration (Algorithm 2)
+num_sampling_steps: 16    # Number of sampling iterations
+cfg_weight: 2.0           # Classifier-free guidance weight
+choice_temperature: 4.5   # Sampling temperature
+
+# Data configuration
+kitti_root: "data/kitti/pykitti"
+tokenizer_checkpoint: "outputs/tokenizer_memory_efficient/checkpoint_step_22000.pt"
+token_dir: "data/kitti/tokens"  # Multi-sequence token directory
+
+# Training on all available sequences
+train_sequences: ["00", "01", "02", "03", "04", "10"]
+val_sequences: ["00"]
+test_sequences: ["00"]
+
+# Logging and checkpointing
+save_every_steps: 2000
+eval_every_steps: 1000
+log_every_steps: 50
+output_dir: "outputs/world_model_large_12gb"
