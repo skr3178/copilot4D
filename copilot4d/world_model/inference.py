@@ -126,7 +126,7 @@ class WorldModelSampler:
                 future_flat = torch.where(update_mask, sampled_tokens, future_flat)
                 
                 # Update mask tracking: unmask the positions we just filled
-                current_mask_flat &= ~update_mask
+                current_mask_flat = current_mask_flat & ~update_mask
                 is_masked[:, T_past] = current_mask_flat.reshape(B, H, W)
             else:
                 # Last step: use all sampled tokens, everything unmasked

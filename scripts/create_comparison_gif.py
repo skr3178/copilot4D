@@ -33,8 +33,9 @@ import io
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from copilot4d.world_model.world_model import CoPilot4DWorldModel, WorldModelConfig
-from copilot4d.world_model.masking import cosine_mask_schedule
+from copilot4d.world_model.world_model import CoPilot4DWorldModel
+from copilot4d.world_model.inference import WorldModelSampler
+from copilot4d.utils.config import WorldModelConfig
 from copilot4d.tokenizer.tokenizer_model import CoPilot4DTokenizer
 from copilot4d.utils.config import TokenizerConfig
 from copilot4d.data.point_cloud_utils import filter_roi
@@ -262,78 +263,31 @@ def create_frame_comparison(original_pc, tokenized_pc, predicted_pc,
 @torch.no_grad()
 def predict_tokens_autoregressive(world_model, initial_tokens, initial_actions, 
                                   num_frames, cfg, device):
-    """Predict multiple future frames autoregressively."""
+    """Predict multiple future frames autoregressively using proper sampler."""
     predictions = []
+    
+    # Create sampler with CFG
+    sampler = WorldModelSampler(world_model, cfg)
     
     # Use last known tokens/actions as starting point
     past_tokens = initial_tokens.to(device)
     past_actions = initial_actions.to(device)
     
     for i in range(num_frames):
-        # Predict next frame
-        pred_frame = predict_single_frame(
-            world_model, past_tokens, past_actions, cfg, device
-        )
-        predictions.append(pred_frame.cpu())
+        # Predict next frame using proper sampling with CFG
+        pred_frame = sampler.predict_next_frame(
+            past_tokens.unsqueeze(0),  # Add batch dim: (1, T, H, W)
+            past_actions.unsqueeze(0),  # (1, T, 16)
+            past_actions[-1:].unsqueeze(0)  # (1, 1, 16)
+        )  # Returns (1, H, W)
+        predictions.append(pred_frame[0].cpu())  # (H, W)
         
         # Update history for next prediction
-        past_tokens = torch.cat([past_tokens[1:], pred_frame.unsqueeze(0)], dim=0)
+        past_tokens = torch.cat([past_tokens[1:], pred_frame], dim=0)  # pred_frame is (1, H, W)
         # Use last action as approximation
         past_actions = torch.cat([past_actions[1:], past_actions[-1:]], dim=0)
     
     return predictions
-
-
-def predict_single_frame(world_model, past_tokens, past_actions, cfg, device):
-    """Predict single future frame."""
-    T_past, H, W = past_tokens.shape
-    N = H * W
-    mask_id = cfg.codebook_size
-    
-    # Single future frame
-    future_token = torch.full((1, H, W), mask_id, dtype=torch.long, device=device)
-    
-    full_tokens = torch.cat([past_tokens, future_token], dim=0)
-    full_actions = torch.cat([past_actions, past_actions[-1:]], dim=0)
-    
-    # Handle sequence length
-    if full_tokens.shape[0] > cfg.num_frames:
-        full_tokens = full_tokens[-cfg.num_frames:]
-        full_actions = full_actions[-cfg.num_frames:]
-        T_past = cfg.num_frames - 1
-    
-    T_total = full_tokens.shape[0]
-    temporal_mask = torch.triu(torch.ones(T_total, T_total) * float('-inf'), diagonal=1).to(device)
-    
-    num_steps = cfg.num_sampling_steps
-    
-    for step in range(num_steps):
-        logits = world_model(full_tokens.unsqueeze(0), full_actions.unsqueeze(0), temporal_mask)
-        logits_future = logits[0, -1:]
-        
-        predictions = logits_future.argmax(dim=-1)
-        future_flat = future_token.reshape(1, N)
-        mask = (future_flat == mask_id)
-        future_flat = torch.where(mask, predictions, future_flat)
-        future_token = future_flat.reshape(1, H, W)
-        full_tokens = torch.cat([full_tokens[:-1], future_token], dim=0)
-        
-        # Remask
-        if step < num_steps - 1:
-            t = (step + 1) / num_steps
-            mask_ratio = cosine_mask_schedule(torch.tensor(t)).item()
-            num_to_mask = int(mask_ratio * N)
-            
-            if num_to_mask > 0:
-                confidences = logits_future.max(dim=-1).values
-                flat_conf = confidences.reshape(-1)
-                _, indices = torch.topk(flat_conf, k=num_to_mask, largest=False)
-                future_flat = future_token.reshape(-1)
-                future_flat[indices] = mask_id
-                future_token = future_flat.reshape(1, H, W)
-                full_tokens = torch.cat([full_tokens[:-1], future_token], dim=0)
-    
-    return future_token[0]
 
 
 def main():
