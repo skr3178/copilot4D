@@ -445,7 +445,7 @@ def main():
         dataset = KITTITokenizerDataset(cfg, sequences=[args.sequence])
         seq = args.sequence
         # Find a valid frame index for this sequence
-        max_frames = len(dataset.datasets[seq].frames)
+        max_frames = len(dataset.datasets[seq].velo_files)
         frame_idx = min(args.sample_idx, max_frames - 1)
         print(f"  Using sequence: {seq}, frame: {frame_idx}")
     else:
@@ -466,32 +466,54 @@ def main():
     trajectory = None
     if args.track_trajectory:
         try:
-            # Load poses from pykitti dataset
-            dataset_seq = dataset.datasets[seq]
+            # Load poses directly from file (pykitti doesn't always load them)
+            pose_file = os.path.join(cfg.kitti_root, "poses", f"{seq}.txt")
+            if not os.path.exists(pose_file):
+                # Try alternative locations
+                alt_paths = [
+                    os.path.join(cfg.kitti_root, "dataset", "poses", f"{seq}.txt"),
+                    os.path.join(cfg.kitti_root, "pykitti", "dataset", "poses", f"{seq}.txt"),
+                ]
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        pose_file = alt_path
+                        break
             
-            # Get trajectory around current frame
-            half_traj = args.trajectory_frames // 2
-            start_frame = max(0, frame_idx - half_traj)
-            end_frame = min(len(dataset_seq.poses), frame_idx + half_traj)
-            
-            # Extract trajectory points (vehicle positions in world coordinates)
-            traj_points = []
-            for i in range(start_frame, end_frame):
-                if i < len(dataset_seq.poses):
-                    # Extract translation from pose matrix
-                    pose = dataset_seq.poses[i]
-                    traj_points.append(pose[:3, 3])
-            
-            if len(traj_points) > 0:
-                trajectory = np.array(traj_points)
-                # Convert to ego-relative coordinates by subtracting current position
-                current_pos = dataset_seq.poses[frame_idx][:3, 3]
-                trajectory = trajectory - current_pos
-                print(f"  Loaded trajectory: {len(trajectory)} points (frames {start_frame}-{end_frame})")
-                print(f"    Trajectory range: X=[{trajectory[:,0].min():.1f}, {trajectory[:,0].max():.1f}], "
-                      f"Y=[{trajectory[:,1].min():.1f}, {trajectory[:,1].max():.1f}]")
+            if os.path.exists(pose_file):
+                poses_12 = np.loadtxt(pose_file)  # (N, 12)
+                
+                # Convert 12-value format to 4x4 matrices
+                def pose_to_matrix(pose_line):
+                    pose = np.eye(4)
+                    pose[:3, :] = pose_line.reshape(3, 4)
+                    return pose
+                
+                poses = [pose_to_matrix(poses_12[i]) for i in range(len(poses_12))]
+                
+                # Get trajectory around current frame
+                half_traj = args.trajectory_frames // 2
+                start_frame = max(0, frame_idx - half_traj)
+                end_frame = min(len(poses), frame_idx + half_traj)
+                
+                # Extract trajectory points (vehicle positions in world coordinates)
+                traj_points = []
+                for i in range(start_frame, end_frame):
+                    if i < len(poses):
+                        # Extract translation from pose matrix
+                        traj_points.append(poses[i][:3, 3])
+                
+                if len(traj_points) > 0:
+                    trajectory = np.array(traj_points)
+                    # Convert to ego-relative coordinates by subtracting current position
+                    current_pos = poses[frame_idx][:3, 3]
+                    trajectory = trajectory - current_pos
+                    print(f"  Loaded trajectory: {len(trajectory)} points (frames {start_frame}-{end_frame})")
+                    print(f"    Trajectory range: X=[{trajectory[:,0].min():.1f}, {trajectory[:,0].max():.1f}], "
+                          f"Y=[{trajectory[:,1].min():.1f}, {trajectory[:,1].max():.1f}]")
+                else:
+                    print(f"  Warning: No trajectory points found")
             else:
-                print(f"  Warning: No trajectory points found")
+                print(f"  Warning: Pose file not found: {pose_file}")
         except Exception as e:
             print(f"  Warning: Could not load trajectory: {e}")
 

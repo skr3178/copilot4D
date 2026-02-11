@@ -300,56 +300,24 @@ def tokens_to_pointcloud_dense(
 
 def compute_chamfer_distance_pytorch3d(pred_points, gt_points):
     """
-    Compute Chamfer Distance using PyTorch3D.
+    Compute Chamfer Distance using PyTorch3D or scipy fallback.
     
     Returns:
         cd: Chamfer distance (meters)
         metrics: dict with detailed stats
     """
-    if not PYTORCH3D_AVAILABLE:
-        # Fallback to scipy
-        from scipy.spatial import cKDTree
-        
-        tree_gt = cKDTree(gt_points)
-        tree_pred = cKDTree(pred_points)
-        
-        dist_pred_to_gt, _ = tree_gt.query(pred_points, k=1)
-        dist_gt_to_pred, _ = tree_pred.query(gt_points, k=1)
-        
-        cd = np.mean(dist_pred_to_gt) + np.mean(dist_gt_to_pred)
-        
-        return cd, {
-            'pred_to_gt_mean': np.mean(dist_pred_to_gt),
-            'pred_to_gt_std': np.std(dist_pred_to_gt),
-            'gt_to_pred_mean': np.mean(dist_gt_to_pred),
-            'gt_to_pred_std': np.std(dist_gt_to_pred),
-        }
-    
-    # PyTorch3D implementation
-    pred_tensor = torch.from_numpy(pred_points).float().unsqueeze(0)
-    gt_tensor = torch.from_numpy(gt_points).float().unsqueeze(0)
-    
-    # Create point clouds
-    pred_pc = Pointclouds(points=pred_tensor)
-    gt_pc = Pointclouds(points=gt_tensor)
-    
-    # Compute chamfer distance
-    cd, loss_dict = chamfer_distance(pred_pc.points_padded(), gt_pc.points_padded(), 
-                                      batch_reduction=None, point_reduction='mean')
-    
-    # Get per-direction distances
-    # chamfer_distance returns (pred_to_gt, gt_to_pred) in loss_dict
-    pred_to_gt = loss_dict['pred_to_gt'].mean().item() if 'pred_to_gt' in loss_dict else cd.item()
-    gt_to_pred = loss_dict['gt_to_pred'].mean().item() if 'gt_to_pred' in loss_dict else cd.item()
-    
-    # Compute detailed stats using scipy for consistency
+    # Always use scipy for detailed stats (more reliable)
     from scipy.spatial import cKDTree
+    
     tree_gt = cKDTree(gt_points)
     tree_pred = cKDTree(pred_points)
+    
     dist_pred_to_gt, _ = tree_gt.query(pred_points, k=1)
     dist_gt_to_pred, _ = tree_pred.query(gt_points, k=1)
     
-    return cd.item(), {
+    cd = np.mean(dist_pred_to_gt) + np.mean(dist_gt_to_pred)
+    
+    return cd, {
         'pred_to_gt_mean': np.mean(dist_pred_to_gt),
         'pred_to_gt_std': np.std(dist_pred_to_gt),
         'gt_to_pred_mean': np.mean(dist_gt_to_pred),
