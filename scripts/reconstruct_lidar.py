@@ -176,8 +176,16 @@ def compute_metrics(pred_depths, gt_depths):
 # Plotting
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plot_bev_comparison(gt_pts, pred_pts, cfg, save_path):
-    """Side-by-side BEV (top-down X-Y) scatter plots."""
+def plot_bev_comparison(gt_pts, pred_pts, cfg, save_path, trajectory=None):
+    """Side-by-side BEV (top-down X-Y) scatter plots.
+    
+    Args:
+        gt_pts: Ground truth points (N, 3)
+        pred_pts: Predicted points (N, 3)
+        cfg: Config with bounds
+        save_path: Path to save figure
+        trajectory: Optional (M, 3) array of vehicle trajectory points to overlay
+    """
     fig, axes = plt.subplots(1, 2, figsize=(18, 8))
 
     for ax, pts, title in [
@@ -186,12 +194,20 @@ def plot_bev_comparison(gt_pts, pred_pts, cfg, save_path):
     ]:
         sc = ax.scatter(pts[:, 0], pts[:, 1], c=pts[:, 2], s=0.2,
                         cmap="viridis", vmin=cfg.z_min, vmax=cfg.z_max)
+        # FIX: Overlay trajectory if provided
+        if trajectory is not None and len(trajectory) > 0:
+            ax.scatter(trajectory[:, 0], trajectory[:, 1], c='white', s=30, 
+                      marker='o', edgecolors='black', linewidths=1.5, 
+                      label='Vehicle path', zorder=5)
+            ax.plot(trajectory[:, 0], trajectory[:, 1], 'w--', alpha=0.5, linewidth=1.5)
         ax.set_xlim(cfg.x_min, cfg.x_max)
         ax.set_ylim(cfg.y_min, cfg.y_max)
         ax.set_aspect("equal")
         ax.set_xlabel("X (m)")
         ax.set_ylabel("Y (m)")
         ax.set_title(title)
+        if trajectory is not None:
+            ax.legend(loc='upper right')
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="3%", pad=0.05)
         plt.colorbar(sc, cax=cax, label="Z (m)")
@@ -203,9 +219,17 @@ def plot_bev_comparison(gt_pts, pred_pts, cfg, save_path):
     print(f"  Saved {save_path}")
 
 
-def plot_side_comparison(gt_pts, pred_pts, cfg, save_path):
-    """Side-by-side X-Z (side view) scatter plots."""
-    fig, axes = plt.subplots(2, 1, figsize=(18, 8))
+def plot_side_comparison(gt_pts, pred_pts, cfg, save_path, trajectory=None):
+    """Side-by-side X-Z (side view) scatter plots.
+    
+    Args:
+        gt_pts: Ground truth points (N, 3)
+        pred_pts: Predicted points (N, 3)
+        cfg: Config with x_min, x_max, y_min, y_max, z_min, z_max
+        save_path: Path to save figure
+        trajectory: Optional (M, 3) array of vehicle trajectory points to overlay
+    """
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))  # FIX: Better aspect ratio for side view
 
     for ax, pts, title in [
         (axes[0], gt_pts, "Ground Truth (side view)"),
@@ -213,11 +237,19 @@ def plot_side_comparison(gt_pts, pred_pts, cfg, save_path):
     ]:
         sc = ax.scatter(pts[:, 0], pts[:, 2], c=pts[:, 1], s=0.2,
                         cmap="plasma", vmin=cfg.y_min, vmax=cfg.y_max)
+        # FIX: Overlay trajectory if provided
+        if trajectory is not None and len(trajectory) > 0:
+            ax.scatter(trajectory[:, 0], trajectory[:, 2], c='white', s=20, 
+                      marker='o', edgecolors='black', linewidths=1, 
+                      label='Vehicle path', zorder=5)
+            ax.plot(trajectory[:, 0], trajectory[:, 2], 'w--', alpha=0.5, linewidth=1)
         ax.set_xlim(cfg.x_min, cfg.x_max)
         ax.set_ylim(cfg.z_min, cfg.z_max)
         ax.set_xlabel("X (m)")
         ax.set_ylabel("Z (m)")
         ax.set_title(title)
+        if trajectory is not None:
+            ax.legend(loc='upper right')
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="2%", pad=0.05)
         plt.colorbar(sc, cax=cax, label="Y (m)")
@@ -315,11 +347,25 @@ def plot_dense_reconstruction(dense_pts, cfg, save_path):
     print(f"  Saved {save_path}")
 
 
-def plot_combined_overlay(gt_pts, pred_pts, cfg, save_path):
-    """Overlay GT (blue) and reconstructed (red) in a single BEV plot."""
-    fig, ax = plt.subplots(figsize=(10, 10))
+def plot_combined_overlay(gt_pts, pred_pts, cfg, save_path, trajectory=None):
+    """Overlay GT (blue) and reconstructed (red) in a single BEV plot.
+    
+    Args:
+        gt_pts: Ground truth points (N, 3)
+        pred_pts: Predicted points (N, 3)
+        cfg: Config with bounds
+        save_path: Path to save figure
+        trajectory: Optional (M, 3) array of vehicle trajectory points to overlay
+    """
+    fig, ax = plt.subplots(figsize=(12, 12))
     ax.scatter(gt_pts[:, 0], gt_pts[:, 1], s=0.15, c="dodgerblue", alpha=0.4, label="Ground Truth")
     ax.scatter(pred_pts[:, 0], pred_pts[:, 1], s=0.15, c="red", alpha=0.4, label="Reconstructed")
+    # FIX: Overlay trajectory if provided
+    if trajectory is not None and len(trajectory) > 0:
+        ax.scatter(trajectory[:, 0], trajectory[:, 1], c='lime', s=40, 
+                  marker='o', edgecolors='black', linewidths=2, 
+                  label='Vehicle path', zorder=5)
+        ax.plot(trajectory[:, 0], trajectory[:, 1], 'g--', alpha=0.6, linewidth=2)
     ax.set_xlim(cfg.x_min, cfg.x_max)
     ax.set_ylim(cfg.y_min, cfg.y_max)
     ax.set_aspect("equal")
@@ -345,6 +391,10 @@ def main():
                         help="Index into the dataset split")
     parser.add_argument("--split", type=str, default="val",
                         choices=["train", "val", "test"])
+    # FIX 1: Add sequence selection to avoid sequence 09 which has no poses
+    parser.add_argument("--sequence", type=str, default=None,
+                        help="Specific sequence to use (e.g., 00, 01, 02). If not set, uses dataset default. "
+                             "Avoid 09 and 10 for val/test splits as they lack ground truth poses.")
     parser.add_argument("--max_rays", type=int, default=0,
                         help="Max rays for matched reconstruction (0 = all points)")
     parser.add_argument("--dense", action="store_true",
@@ -355,6 +405,11 @@ def main():
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--chunk_size", type=int, default=512,
                         help="Ray chunk size for rendering (tune for GPU memory)")
+    # FIX 2: Add trajectory tracking option
+    parser.add_argument("--track_trajectory", action="store_true",
+                        help="Overlay vehicle trajectory on BEV visualizations")
+    parser.add_argument("--trajectory_frames", type=int, default=50,
+                        help="Number of frames to show in trajectory (default: 50, -1 for all)")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -381,13 +436,64 @@ def main():
 
     # ── Load dataset sample ──────────────────────────────────────────────
     print(f"\nLoading KITTI {args.split} sample {args.sample_idx}...")
-    dataset = KITTITokenizerDataset(cfg, split=args.split)
+    
+    # FIX 1: Allow loading specific sequence even if not in split
+    # This avoids sequences 09 and 10 which don't have ground truth poses
+    if args.sequence is not None:
+        # Create dataset with specific sequence
+        print(f"  Loading specific sequence: {args.sequence}")
+        dataset = KITTITokenizerDataset(cfg, sequences=[args.sequence])
+        seq = args.sequence
+        # Find a valid frame index for this sequence
+        max_frames = len(dataset.datasets[seq].frames)
+        frame_idx = min(args.sample_idx, max_frames - 1)
+        print(f"  Using sequence: {seq}, frame: {frame_idx}")
+    else:
+        dataset = KITTITokenizerDataset(cfg, split=args.split)
+        seq, frame_idx = dataset.samples[args.sample_idx]
+        # Warn if using sequence without poses
+        if seq in ['09', '10']:
+            print(f"  Warning: Sequence {seq} does not have ground truth poses available.")
+            print(f"           Use --sequence to specify a different sequence (e.g., 00, 01, 02).")
+    
     print(f"  Dataset size: {len(dataset)}")
-
-    # Get the raw point cloud directly for full reconstruction
-    seq, frame_idx = dataset.samples[args.sample_idx]
+    
     raw_points = dataset.datasets[seq].get_velo(frame_idx)  # (N, 4)
     print(f"  Raw point cloud: {raw_points.shape[0]} points")
+    print(f"  Sequence: {seq}, Frame: {frame_idx}")
+    
+    # FIX 2: Load trajectory data if requested
+    trajectory = None
+    if args.track_trajectory:
+        try:
+            # Load poses from pykitti dataset
+            dataset_seq = dataset.datasets[seq]
+            
+            # Get trajectory around current frame
+            half_traj = args.trajectory_frames // 2
+            start_frame = max(0, frame_idx - half_traj)
+            end_frame = min(len(dataset_seq.poses), frame_idx + half_traj)
+            
+            # Extract trajectory points (vehicle positions in world coordinates)
+            traj_points = []
+            for i in range(start_frame, end_frame):
+                if i < len(dataset_seq.poses):
+                    # Extract translation from pose matrix
+                    pose = dataset_seq.poses[i]
+                    traj_points.append(pose[:3, 3])
+            
+            if len(traj_points) > 0:
+                trajectory = np.array(traj_points)
+                # Convert to ego-relative coordinates by subtracting current position
+                current_pos = dataset_seq.poses[frame_idx][:3, 3]
+                trajectory = trajectory - current_pos
+                print(f"  Loaded trajectory: {len(trajectory)} points (frames {start_frame}-{end_frame})")
+                print(f"    Trajectory range: X=[{trajectory[:,0].min():.1f}, {trajectory[:,0].max():.1f}], "
+                      f"Y=[{trajectory[:,1].min():.1f}, {trajectory[:,1].max():.1f}]")
+            else:
+                print(f"  Warning: No trajectory points found")
+        except Exception as e:
+            print(f"  Warning: Could not load trajectory: {e}")
 
     # Filter to ROI
     points_roi = filter_roi(raw_points, cfg)
@@ -470,10 +576,12 @@ def main():
     plot_bev_comparison(
         gt_pts, pred_pts, cfg,
         os.path.join(args.output_dir, "bev_comparison.png"),
+        trajectory=trajectory,
     )
     plot_side_comparison(
         gt_pts, pred_pts, cfg,
         os.path.join(args.output_dir, "side_comparison.png"),
+        trajectory=trajectory,
     )
     plot_depth_scatter(
         gt_depths_t, pred_depths_t,
@@ -490,6 +598,7 @@ def main():
     plot_combined_overlay(
         gt_pts, pred_pts, cfg,
         os.path.join(args.output_dir, "bev_overlay.png"),
+        trajectory=trajectory,
     )
 
     # ── Dense spherical reconstruction ───────────────────────────────────
