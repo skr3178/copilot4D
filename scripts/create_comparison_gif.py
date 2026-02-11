@@ -175,7 +175,8 @@ def load_original_lidar(kitti_root, sequence, frame_idx, cfg):
 
 
 def create_frame_comparison(original_pc, tokenized_pc, predicted_pc, 
-                            roi_bounds, frame_idx, total_frames, fps=10):
+                            roi_bounds, frame_idx, total_frames, fps=10, 
+                            sequence="00", start_frame=0):
     """Create a single comparison frame with all three views."""
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     
@@ -244,7 +245,7 @@ def create_frame_comparison(original_pc, tokenized_pc, predicted_pc,
     plt.colorbar(sc, cax=cax, label="Z (m)")
     
     time_sec = frame_idx / fps
-    fig.suptitle(f"Frame +{frame_idx} ({time_sec:.1f}s ahead) | Seq 00 Frame 500+{frame_idx}", 
+    fig.suptitle(f"Frame +{frame_idx} ({time_sec:.1f}s ahead) | Seq {sequence} Frame {start_frame}+{frame_idx}", 
                  fontsize=14, fontweight='bold')
     fig.tight_layout()
     
@@ -441,7 +442,8 @@ def main():
         # Create comparison image
         img = create_frame_comparison(
             original_pc, tokenized_pc, predicted_pc,
-            roi_bounds, i+1, args.num_frames, args.fps
+            roi_bounds, i+1, args.num_frames, args.fps,
+            args.sequence, args.start_frame
         )
         frames.append(img)
         
