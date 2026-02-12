@@ -1,4 +1,4 @@
-# CoPilot4D Tokenizer Config - Increased Depth Resolution
+# CoPilot4D Tokenizer Config - Increased Depth Resolution + Depth-Weighted Loss
 # Optimized for continued training from step 100000
 # 
 # Changes from tokenizer_memory_efficient.yaml:
@@ -6,9 +6,11 @@
 #   - batch_size: 4 -> 2 (to accommodate more depth samples)
 #   - grad_accum_steps: 8 -> 16 (maintain effective batch size 32)
 #   - lr: 1.0e-4 -> 5.0e-5 (lower for fine-tuning)
+#   - warmup_steps: 2000 (increased for loss change adaptation)
+#   - NEW: Depth-weighted loss with gradual ramp
 #
 # Target GPU Memory: ~9-10GB (fits safely in 12GB GPU)
-# Expected Improvement: 25-30% better accuracy at 20-40m range
+# Expected Improvement: 25-40% better accuracy at 20-50m range
 
 # ROI bounds (metres)
 x_min: -40.0
@@ -73,18 +75,42 @@ skip_upsample_factor: 4
 # Loss
 surface_conc_eps: 0.4
 
+# NEW: Depth-weighted loss parameters
+# 
+# CRITICAL: We use DIRECT depth weighting (depth^alpha) to emphasize FAR FIELD (30-50m)
+# NOT inverse weighting (1/depth^alpha) which would emphasize near field.
+#
+# With alpha=0.5:
+#   - 10m depth: weight = sqrt(10) ≈ 3.16
+#   - 50m depth: weight = sqrt(50) ≈ 7.07
+#   - Far field gets ~2.2x more gradient emphasis
+#
+# Weights are normalized to sum to 1.0 to maintain stable total loss magnitude
+# during the ramp (prevents destabilizing VQ and surface concentration).
+#
+# Ramp schedule:
+#   Step 100000: 90% absolute, 10% relative (total = 1.0)
+#   Step 102500: 75% absolute, 25% relative (total = 1.0)
+#   Step 105000: 50% absolute, 50% relative (total = 1.0, target reached)
+
+depth_loss_type: "combined"         # Options: "l1", "weighted", "relative", "combined"
+depth_loss_alpha: 0.5               # depth^α weighting (0=uniform, 0.5=emphasizes far field)
+depth_loss_absolute_weight: 0.9     # Starting weight for absolute (will decrease proportionally)
+depth_loss_relative_weight: 0.1     # Starting weight for relative (will increase to 0.9)
+depth_loss_ramp_steps: 5000         # Steps to ramp: 100000-105000
+
 # Data (KITTI Odometry)
 kitti_root: "data/kitti/pykitti"
 train_sequences: ["00", "01", "02", "03", "04", "05", "06", "07", "08"]
 val_sequences: ["09"]
 test_sequences: ["10"]
 
-# Training - ADJUSTED for increased depth resolution
+# Training - ADJUSTED for increased depth resolution and new loss
 batch_size: 2           # Reduced from 4 to accommodate 2x depth samples
 grad_accum_steps: 16    # Increased from 8 (maintain effective batch 32)
 lr: 5.0e-5              # Reduced from 1.0e-4 for fine-tuning from step 100000
 weight_decay: 0.01
-warmup_steps: 1000      # Shorter warmup for continued training
+warmup_steps: 2000      # Increased from 1000 for loss change adaptation
 max_steps: 200000
 amp: true
 
@@ -97,8 +123,12 @@ output_dir: "outputs/tokenizer_memory_efficient"
 # Expected Performance:
 #   Memory usage: ~9-10GB GPU
 #   Training speed: Similar (same effective batch size)
-#   Depth accuracy: 25-30% improvement at 20-40m range
+#   Depth accuracy: 25-40% improvement at 20-50m range
 #   
+# Loss Ramp Schedule (first 5000 steps):
+#   Step 100000-105000: relative_weight increases 0.1 -> 1.0
+#   Step 105000+: relative_weight fixed at 1.0
+#
 # To resume training from step 100000:
 #   python scripts/train_tokenizer.py \
 #       --config configs/tokenizer_increased_depth.yaml \

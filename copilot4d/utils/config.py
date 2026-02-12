@@ -88,6 +88,16 @@ class TokenizerConfig:
 
     # --- Loss ---
     surface_conc_eps: float = 0.4  # Paper: margin epsilon = 0.4 meters
+    
+    # Depth loss type: "l1" (standard), "weighted", "relative", or "combined"
+    depth_loss_type: str = "l1"
+    # Depth weighting alpha: 0=uniform, 0.5=balanced, 1.0=full 1/depth weighting
+    depth_loss_alpha: float = 0.5
+    # Weights for combined loss: L = w_abs * L_abs + w_rel * L_rel
+    depth_loss_absolute_weight: float = 0.5
+    depth_loss_relative_weight: float = 0.5
+    # Gradual ramp for relative weight (0 to target over N steps)
+    depth_loss_ramp_steps: int = 5000
 
     # --- Data ---
     kitti_root: str = "data/kitti/pykitti"

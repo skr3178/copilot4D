@@ -108,6 +108,37 @@ def create_scheduler(optimizer, cfg: TokenizerConfig):
     return scheduler
 
 
+def compute_relative_weight(step: int, cfg: TokenizerConfig) -> float:
+    """Compute the current relative loss weight with gradual ramp.
+    
+    Ramps from cfg.depth_loss_relative_weight (start) to 1.0 (target)
+    over cfg.depth_loss_ramp_steps steps.
+    
+    Args:
+        step: Current training step
+        cfg: TokenizerConfig with depth_loss_ramp_steps and depth_loss_relative_weight
+        
+    Returns:
+        Current relative weight (float)
+    """
+    if cfg.depth_loss_type != "combined":
+        # Not using combined loss, use config value directly
+        return cfg.depth_loss_relative_weight
+    
+    start_weight = cfg.depth_loss_relative_weight  # e.g., 0.1
+    target_weight = 1.0  # Final target
+    ramp_steps = cfg.depth_loss_ramp_steps  # e.g., 5000
+    
+    if ramp_steps <= 0 or step >= ramp_steps:
+        # Ramp complete or disabled
+        return target_weight
+    
+    # Linear ramp from start_weight to target_weight
+    alpha = step / ramp_steps
+    current_weight = start_weight + (target_weight - start_weight) * alpha
+    return current_weight
+
+
 def train_step(
     model: CoPilot4DTokenizer,
     batch: dict,
@@ -115,6 +146,7 @@ def train_step(
     scaler: GradScaler,
     cfg: TokenizerConfig,
     device: torch.device,
+    step: int,
 ) -> dict:
     """Single training step."""
     model.train()
@@ -129,6 +161,9 @@ def train_step(
     gt_occupancy = batch["gt_occupancy"].to(device)
     batch_size = batch["batch_size"]
 
+    # Compute current relative weight for gradual ramp
+    rel_weight = compute_relative_weight(step, cfg)
+
     # Forward pass with AMP
     with autocast(enabled=cfg.amp):
         outputs = model(
@@ -140,6 +175,7 @@ def train_step(
             ray_directions=ray_directions,
             gt_depths=ray_depths,
             gt_occupancy=gt_occupancy,
+            depth_loss_relative_weight=rel_weight,
         )
 
         loss = outputs["losses"]["total"]
@@ -154,6 +190,7 @@ def train_step(
     return {
         "loss": loss.item() * cfg.grad_accum_steps,
         "losses": outputs["losses"],
+        "rel_weight": rel_weight,  # Log for monitoring
     }
 
 
@@ -221,7 +258,11 @@ def log_training_metrics(step: int, train_outputs: dict, lr: float, output_dir: 
         "loss_total": to_float(train_outputs.get("loss", 0)),
         # Depth metrics
         "depth_l1": to_float(losses.get("depth_l1", 0)),
+        "depth_abs": to_float(losses.get("depth_abs", 0)),
+        "depth_rel": to_float(losses.get("depth_rel", 0)),
         "surface_conc": to_float(losses.get("surface_conc", 0)),
+        # Relative weight (for monitoring ramp)
+        "rel_weight": to_float(train_outputs.get("rel_weight", 0)),
         # VQ loss components
         "vq_total": to_float(losses.get("vq", 0)),
         "vq_codebook": to_float(losses.get("vq_codebook", 0)),
@@ -393,7 +434,7 @@ def main():
         for batch in train_loader:
             # Training step
             train_outputs = train_step(
-                model, batch, optimizer, scaler, cfg, device
+                model, batch, optimizer, scaler, cfg, device, step
             )
 
             # Gradient accumulation
@@ -413,9 +454,13 @@ def main():
                 postfix = {
                     "loss": f"{train_outputs['loss']:.3f}",
                     "depth": f"{losses.get('depth_l1', 0):.3f}",
+                    "depth_rel": f"{losses.get('depth_rel', 0):.3f}",
                     "vq": f"{losses.get('vq', 0):.4f}",
                     "lr": f"{scheduler.get_last_lr()[0]:.6f}",
                 }
+                # Show relative weight during ramp period
+                if cfg.depth_loss_type == "combined" and step < cfg.depth_loss_ramp_steps:
+                    postfix["rel_w"] = f"{train_outputs.get('rel_weight', 0):.2f}"
                 pbar.set_postfix(postfix)
             
             # Detailed logging every 100 steps

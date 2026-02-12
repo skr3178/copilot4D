@@ -197,6 +197,8 @@ class CoPilot4DTokenizer(nn.Module):
         ray_directions: torch.Tensor,
         gt_depths: Optional[torch.Tensor] = None,
         gt_occupancy: Optional[torch.Tensor] = None,
+        # Optional depth loss parameters for training
+        depth_loss_relative_weight: Optional[float] = None,
     ) -> Dict[str, torch.Tensor]:
         """Full forward pass with optional loss computation.
 
@@ -259,6 +261,10 @@ class CoPilot4DTokenizer(nn.Module):
             vq_loss_codebook = torch.tensor(vq_metrics.get("vq_loss_codebook", 0.0), device=device)
             vq_loss_commitment = torch.tensor(vq_metrics.get("vq_loss_commitment", 0.0), device=device)
             
+            # Use config depth loss parameters
+            # Allow override of relative weight for gradual ramp during training
+            rel_weight = depth_loss_relative_weight if depth_loss_relative_weight is not None else self.cfg.depth_loss_relative_weight
+            
             losses = tokenizer_total_loss(
                 pred_depths=pred_depths,
                 gt_depths=gt_depths,
@@ -271,6 +277,10 @@ class CoPilot4DTokenizer(nn.Module):
                 vq_weight=1.0,
                 vq_loss_codebook=vq_loss_codebook,
                 vq_loss_commitment=vq_loss_commitment,
+                depth_loss_type=self.cfg.depth_loss_type,
+                depth_loss_alpha=self.cfg.depth_loss_alpha,
+                depth_loss_absolute_weight=self.cfg.depth_loss_absolute_weight,
+                depth_loss_relative_weight=rel_weight,
             )
             result["losses"] = losses
 
