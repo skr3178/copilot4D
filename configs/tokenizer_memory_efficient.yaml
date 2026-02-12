@@ -52,11 +52,11 @@ nfg_feat_dim: 16
 nfg_upsample_factor: 2
 nfg_z_bins: 16          # Matches voxel_grid_z
 nfg_mlp_hidden: 32
-num_depth_samples: 48   # Was 64 (25% reduction)
+num_depth_samples: 128  # Increased from 48 for better depth resolution (doubled from 64)
 
 # Rays - fewer
-rays_per_frame: 2048    # Original 2048 rays
-ray_chunk_size: 128     # Was 256 (smaller chunks)
+rays_per_frame: 2048    # Keep original ray count for quality
+ray_chunk_size: 64      # Smaller chunks for finer memory management
 
 # Spatial skip
 skip_upsample_factor: 4
@@ -70,9 +70,9 @@ train_sequences: ["00", "01", "02", "03", "04", "05", "06", "07", "08"]
 val_sequences: ["09"]
 test_sequences: ["10"]
 
-# Training - smaller batches
-batch_size: 4           # Original batch size
-grad_accum_steps: 4     # Effective batch size = 8 (was 16)
+# Training - optimized for 12GB with higher depth resolution
+batch_size: 2           # Reduced from 4 to save memory for more depth samples
+grad_accum_steps: 8     # Effective batch size = 16 (was 8, now matching paper)
 lr: 1.0e-4
 weight_decay: 0.01
 warmup_steps: 2000

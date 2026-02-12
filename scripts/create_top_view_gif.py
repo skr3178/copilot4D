@@ -50,9 +50,9 @@ def load_sequence_frames(kitti_root: str, sequence: str, start_frame: int, num_f
 
 def create_top_down_bev(points: np.ndarray, cfg: TokenizerConfig,
                         figsize: tuple = (12, 12), dpi: int = 100,
-                        point_size: float = 0.2):
+                        point_size: float = 1.0):
     """
-    Create a pure top-down BEV view of the point cloud.
+    Create a pure top-down BEV view of the point cloud with light background.
     """
     # Filter to ROI
     points_filtered = filter_roi(points, cfg)
@@ -61,17 +61,17 @@ def create_top_down_bev(points: np.ndarray, cfg: TokenizerConfig,
     if len(xyz) == 0:
         return None
     
-    # Create figure with dark background
+    # Create figure with white/light gray background
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    fig.patch.set_facecolor('black')
-    ax.set_facecolor('black')
+    fig.patch.set_facecolor('#fafafa')
+    ax.set_facecolor('#fafafa')
     
-    # Color by height (z) using viridis colormap
+    # Color by height (z) using plasma colormap for better contrast
     z_values = xyz[:, 2]
     scatter = ax.scatter(xyz[:, 0], xyz[:, 1], 
-                        c=z_values, s=point_size, alpha=0.9, 
-                        cmap='viridis', vmin=cfg.z_min, vmax=cfg.z_max,
-                        marker='.', linewidths=0)
+                        c=z_values, s=point_size, alpha=1.0, 
+                        cmap='plasma', vmin=cfg.z_min, vmax=cfg.z_max,
+                        marker='o', linewidths=0, edgecolors='none')
     
     # Set limits to ROI
     ax.set_xlim(cfg.x_min, cfg.x_max)
@@ -99,9 +99,9 @@ def create_top_down_bev(points: np.ndarray, cfg: TokenizerConfig,
 
 def create_top_down_bev_with_ego(points: np.ndarray, cfg: TokenizerConfig,
                                   figsize: tuple = (12, 12), dpi: int = 100,
-                                  point_size: float = 0.2):
+                                  point_size: float = 1.0):
     """
-    Create top-down BEV view with ego vehicle marker.
+    Create top-down BEV view with ego vehicle marker and light background.
     """
     # Filter to ROI
     points_filtered = filter_roi(points, cfg)
@@ -110,17 +110,17 @@ def create_top_down_bev_with_ego(points: np.ndarray, cfg: TokenizerConfig,
     if len(xyz) == 0:
         return None
     
-    # Create figure with dark background
+    # Create figure with white/light gray background
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    fig.patch.set_facecolor('black')
-    ax.set_facecolor('black')
+    fig.patch.set_facecolor('#fafafa')
+    ax.set_facecolor('#fafafa')
     
-    # Color by height (z) using viridis colormap
+    # Color by height (z) using plasma colormap for better contrast
     z_values = xyz[:, 2]
     scatter = ax.scatter(xyz[:, 0], xyz[:, 1], 
-                        c=z_values, s=point_size, alpha=0.9, 
-                        cmap='viridis', vmin=cfg.z_min, vmax=cfg.z_max,
-                        marker='.', linewidths=0)
+                        c=z_values, s=point_size, alpha=1.0, 
+                        cmap='plasma', vmin=cfg.z_min, vmax=cfg.z_max,
+                        marker='o', linewidths=0, edgecolors='none')
     
     # Add ego vehicle marker at origin
     # Draw a simple arrow or triangle pointing forward (x direction)
@@ -129,7 +129,7 @@ def create_top_down_bev_with_ego(points: np.ndarray, cfg: TokenizerConfig,
         [ego_size, 0],
         [-ego_size/2, ego_size/2],
         [-ego_size/2, -ego_size/2]
-    ], fill=True, color='red', alpha=0.8, zorder=10)
+    ], fill=True, color='red', alpha=0.9, zorder=10)
     ax.add_patch(ego_triangle)
     
     # Set limits to ROI
