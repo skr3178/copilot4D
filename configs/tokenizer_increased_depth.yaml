@@ -115,7 +115,7 @@ max_steps: 200000
 amp: true
 
 # Checkpointing
-save_every_steps: 10000
+save_every_steps: 5000
 eval_every_steps: 1000
 num_eval_batches: 10
 output_dir: "outputs/tokenizer_memory_efficient"
