@@ -181,7 +181,7 @@ data/nuScenes/nuScenes-panoptic-*/
 *.tfrecord
 *.record
 annotations/
-images/
+/images/
 labels/
 
 # =============================================================================
@@ -290,15 +290,29 @@ papers/*.PDF
 # =============================================================================
 # Images and Visualizations
 # =============================================================================
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.tiff
-*.svg
+# Allow assets and figures (for README/documentation)
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.jpeg
+!assets/**/*.gif
+!assets/**/*.svg
+!figures/**/*.png
+!figures/**/*.jpg
+!figures/**/*.jpeg
+!figures/**/*.gif
+!figures/**/*.svg
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
+!docs/**/*.gif
+!docs/**/*.svg
+
+# Ignore outputs folder (large generated files)
 outputs/
 !outputs/.gitkeep
+
+# Allow root-level documentation images
+!UNet.png
 
 # =============================================================================
 # Temporary and Cache Files
@@ -330,6 +344,9 @@ reference_code/Swin-Transformer/
 reference_code/GPT2/
 reference_code/nerf-pytorch/
 reference_code/vector-quantize-pytorch/
+
+# Nested git repositories (third-party libraries)
+data/kitti/pykitti/
 
 # Testing files
 testing_tokenizer.py
